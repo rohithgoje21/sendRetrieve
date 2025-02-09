@@ -1,49 +1,90 @@
 body {
-    font-family: Arial, sans-serif;
+    font-family: 'Arial', sans-serif;
     text-align: center;
-    background-color: #f4f4f4;
-    padding: 20px;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .container {
-    max-width: 400px;
-    margin: auto;
+    width: 90%;
+    max-width: 500px;
     background: white;
-    padding: 20px;
+    padding: 25px;
     border-radius: 10px;
-    box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.5);
 }
 
 h1 {
     color: #333;
+    font-size: 24px;
+    margin-bottom: 10px;
+}
+
+h2 {
+    font-size: 20px;
+    color: #555;
+    margin-bottom: 10px;
 }
 
 .section {
-    margin-top: 20px;
+    background: #f9f9f9;
+    padding: 15px;
+    border-radius: 8px;
+    margin: 15px 0;
+    box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.5);
 }
 
 textarea, input {
-    width: 100%;
+    width: calc(100% - 20px);
     padding: 10px;
     margin: 10px 0;
-    border: 1px solid #ccc;
+    border: 1px solid #ddd;
     border-radius: 5px;
+    font-size: 16px;
+    resize: vertical;
 }
 
 button {
-    padding: 10px 15px;
-    border: none;
-    background-color: #28a745;
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
     color: white;
-    cursor: pointer;
+    background: #007bff;
+    border: none;
     border-radius: 5px;
+    cursor: pointer;
+    transition: 0.3s;
 }
 
 button:hover {
-    background-color: #218838;
+    background: #0056b3;
 }
 
-p {
+.retrieved-text-container {
+    display: none;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 10px;
+    box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.5);
+    word-wrap: break-word;
+    text-align: left;
+}
+
+.generated-id-container {
+    display: none;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 10px;
+    box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.5);
     font-weight: bold;
-    color: #333;
+    text-align: center;
+}
+
+@media (max-width: 480px) {
+    .container {
+        width: 95%;
+    }
 }
