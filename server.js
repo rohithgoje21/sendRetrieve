@@ -1,7 +1,9 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const bodyParser = require('body-parser');
+const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 
 const app = express();
 const PORT = 8080;
@@ -9,20 +11,36 @@ const PORT = 8080;
 // Middleware
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Connect to MongoDB
-mongoose.connect("mongodb://localhost:27017/textDB", {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
+mongoose.connect("mongodb://localhost:27017/dataDB", {
 });
 
-const textSchema = new mongoose.Schema({
+// Set up file storage
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const uploadPath = path.join(__dirname, "uploads");
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath);
+        }
+        cb(null, uploadPath);
+    },
+    filename: (req, file, cb) => {
+        cb(null, `${file.originalname}-${Date.now()}`);
+    }
+});
+const upload = multer({ storage });
+
+// Define Schema
+const dataSchema = new mongoose.Schema({
     id: { type: String, unique: true },
     text: String,
+    fileUrl: String,
     createdAt: { type: Date, default: Date.now, expires: 86400 },
 });
 
-const Text = mongoose.model("Text", textSchema);
+const Data = mongoose.model("Data", dataSchema);
 
 // Generate a 4-digit unique ID
 const generateId = async () => {
@@ -30,37 +48,47 @@ const generateId = async () => {
     let exists;
     do {
         id = Math.floor(1000 + Math.random() * 9000).toString();
-        exists = await Text.findOne({ id });
+        exists = await Data.findOne({ id });
     } while (exists);
     return id;
 };
 
-// Endpoint to send text
-app.post("/send", async (req, res) => {
+// Endpoint to send data (text or file)
+app.post("/send", upload.single("file"), async (req, res) => {
     const { text } = req.body;
-    if (!text) return res.status(400).json({ error: "Text is required" });
+    const file = req.file;
+
+    if (!text && !file) {
+        return res.status(400).json({ error: "Text or file is required" });
+    }
 
     const id = await generateId();
-    const newText = new Text({ id, text });
-    await newText.save();
+    const fileUrl = file ? `/uploads/${file.filename}` : null;
+
+    const newData = new Data({ id, text, fileUrl });
+    await newData.save();
 
     res.json({ id });
 });
 
-// Endpoint to retrieve text
+// Endpoint to retrieve data
 app.get("/retrieve/:id", async (req, res) => {
     const { id } = req.params;
-    const record = await Text.findOne({ id });
-    if (!record)
-        return res.status(404).json({ error: "Text not found or expired" });
+    const record = await Data.findOne({ id });
 
-    res.json({ text: record.text });
+    if (!record) {
+        return res.status(404).json({ error: "Data not found or expired" });
+    }
+
+    res.json({ text: record.text, fileUrl: record.fileUrl });
 });
 
+// Serve the index.html file
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+// Start the server
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });

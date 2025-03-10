@@ -8,22 +8,25 @@
 </head>
 <body>
     <div class="container">
-        <h1>Send & Retrieve Text</h1>
+        <h1>Send & Retrieve Data</h1>
+        
         <div class="section">
-            <h2>Send Text</h2>
+            <h2>Send your data</h2>
             <textarea id="textInput" placeholder="Enter your text here"></textarea>
-            <button onclick="sendText()">Send</button>
+            <input type="file" id="fileInput">
+            <button onclick="send()">Send</button>
             <div id="generatedIdContainer" class="generated-id-container">
                 <p id="generatedId"></p>
             </div>            
         </div>
 
         <div class="section">
-            <h2>Retrieve Text</h2>
+            <h2>Retrieve data</h2>
             <input type="text" id="retrieveId" placeholder="Enter 4-digit ID">
-            <button onclick="retrieveText()">Retrieve</button>
-            <div id="retrievedTextContainer" class="retrieved-text-container">
+            <button onclick="retrieve()">Retrieve</button>
+            <div id="retrievedContainer" class="retrieved-container">
                 <p id="retrievedText"></p>
+                <a id="retrievedFile" href="#" download></a>
             </div>
         </div>
     </div>
