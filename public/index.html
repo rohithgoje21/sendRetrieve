@@ -1,23 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>sendRetrieve</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
     <div class="container">
         <h1>Send & Retrieve Data</h1>
-        
+
         <div class="section">
             <h2>Send your data</h2>
-            <textarea id="textInput" placeholder="Enter your text here"></textarea>
+            <textarea id="textInput" rows="10" placeholder="Enter your text here"></textarea>
             <input type="file" id="fileInput">
             <button onclick="send()">Send</button>
             <div id="generatedIdContainer" class="generated-id-container">
-                <p id="generatedId"></p>
-            </div>            
+                <p>Your Code: <b id="generatedId">1234</b></p>
+                <button class="copy-btn" id="copyBtn1" onclick="copyText('generatedId',this)">Copy</button>
+            </div>
         </div>
 
         <div class="section">
@@ -25,6 +28,7 @@
             <input type="text" id="retrieveId" placeholder="Enter 4-digit ID">
             <button onclick="retrieve()">Retrieve</button>
             <div id="retrievedContainer" class="retrieved-container">
+                <button class="copy-btn" id="copyBtn2" onclick="copyText('retrievedText',this)">Copy</button>
                 <p id="retrievedText"></p>
                 <a id="retrievedFile" href="#" download></a>
             </div>
@@ -33,4 +37,5 @@
 
     <script src="script.js"></script>
 </body>
+
 </html>

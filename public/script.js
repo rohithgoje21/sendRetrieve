@@ -18,13 +18,12 @@ const send = async () => {
     });
 
     const result = await response.json();
-
     const generatedIdContainer = document.getElementById("generatedIdContainer");
     const generatedIdElement = document.getElementById("generatedId");
-    
+
     if (result.id) {
-        generatedIdElement.innerText = `Your Code: ${result.id}`;
-        generatedIdContainer.style.display = "block";
+        generatedIdElement.innerHTML = result.id;
+        generatedIdContainer.style.display = "flex";
     } else {
         alert("Error sending data.");
         generatedIdContainer.style.display = "none";
@@ -53,8 +52,9 @@ const retrieve = async () => {
     }
 
     if (result.fileUrl) {
+        const fileName = result.fileUrl.split('/').pop();
         retrievedFileElement.href = result.fileUrl;
-        retrievedFileElement.innerText = "Download File";
+        retrievedFileElement.innerText = fileName;
         retrievedFileElement.style.display = "block";
     } else {
         retrievedFileElement.style.display = "none";
@@ -67,3 +67,17 @@ const retrieve = async () => {
         retrievedContainer.style.display = "none";
     }
 };
+
+function copyText(elementId, button) {
+    const textToCopy = document.getElementById(elementId).textContent;
+    navigator.clipboard.writeText(textToCopy).then(() => {
+        button.textContent = "Copied!";
+
+        setTimeout(() => {
+            button.textContent = "Copy";
+        }, 1000);
+    }).catch(err => {
+        console.error("Failed to copy: ", err);
+    });
+}
+
