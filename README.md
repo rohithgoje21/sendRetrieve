@@ -30,19 +30,42 @@ Share text and files temporarily with a short code. Shares delete themselves whe
 - CSRF protection: `SameSite=Strict` cookies plus an `Origin` check on state-changing requests
 - **Zod** validation on every request body
 - Owners can only see and manage their own shares (other people's return 404)
-- Rate limiting on sign-up, login, password reset, and creating, opening and downloading shares
+- **Rate limiting** per IP on sign-up, login, password reset, and creating, opening and downloading shares. Stored in **Redis** when configured, so limits are shared between instances and survive restarts
+- **Brute-force lockouts** per target: 10 wrong passwords lock a share, and 10 failed logins lock an account, for 15 minutes, whichever IPs the attempts come from. Unknown emails are counted too, so a lockout doesn't reveal which accounts exist. Keys are hashed, so Redis holds no emails or share IDs
+- If Redis goes down, limits fail open and the site keeps working (`/healthz` reports `degraded`)
 - Helmet security headers, including a strict Content-Security-Policy
 - Files are stored under random names and never served statically. Only known media types are served inline; HTML, SVG and everything else are forced to download
+
+## Operations
+
+- **Structured logging** (Pino): one JSON line per request with method, route, status, duration, user ID and a request ID, plus event logs (`share.created`, `share.opened`, `auth.login_failed`, `auth.refresh_token_reuse`, `rate_limit.exceeded`, ...) tagged with the same request ID. Share codes, tokens, passwords, message text, file names and cookies are never logged
+- **Request IDs** in the `X-Request-Id` header and in 500 responses, so a user can quote one and the matching log line can be found
+- **Health check** at `/healthz`: `ok`, `degraded` (Redis down), or `503` (MongoDB down or shutting down)
+- **Graceful shutdown** on SIGTERM: stop taking new connections, finish in-flight requests, close MongoDB and Redis
+- **Docker**: production image (non-root, health check) and a Compose file for the full stack
 
 ## Tech stack
 
 - **Frontend:** HTML, CSS, JavaScript
 - **Backend:** Node.js, Express 5, Multer, JSON Web Tokens, Zod
 - **Database:** MongoDB (Mongoose)
+- **Rate limits & lockouts:** Redis
+- **Logging:** Pino
 - **Email:** Resend
+- **Infrastructure:** Docker, Docker Compose, Railway
 - **Testing:** Jest, Supertest, mongodb-memory-server
 
 ## Running locally
+
+### With Docker (everything included)
+
+```bash
+docker compose up --build
+```
+
+Starts the app on http://localhost:8080 with MongoDB and Redis. Data persists in Docker volumes; `docker compose down -v` wipes it. Settings such as `APP_PORT`, `TOKEN_SECRET` or `RESEND_API_KEY` can go in a `.env` file.
+
+### With Node
 
 ```bash
 npm install
@@ -50,10 +73,19 @@ cp .env.example .env   # then edit as needed
 npm run dev            # or: npm start
 ```
 
-The app runs on http://localhost:8080 and needs a MongoDB instance (`MONGODB_URI`). Without `RESEND_API_KEY`, password reset emails are printed to the server console.
+Needs a MongoDB instance (`MONGODB_URI`); Redis is optional. Without `RESEND_API_KEY`, password reset emails are written to the log.
+
+### Tests
 
 ```bash
 npm test               # runs against an in-memory MongoDB, no setup needed
+```
+
+The Redis tests run when a Redis is available:
+
+```bash
+docker run -d --rm -p 6390:6379 redis:8-alpine
+TEST_REDIS_URL=redis://localhost:6390 npm test
 ```
 
 ### Environment variables
@@ -63,11 +95,19 @@ npm test               # runs against an in-memory MongoDB, no setup needed
 | `MONGODB_URI` | MongoDB connection string |
 | `TOKEN_SECRET` | Long random string. Signs sessions and download links; **required in production** |
 | `APP_URL` | Public URL, used in emailed links; **required in production** |
+| `REDIS_URL` | Optional. Rate limits and lockouts in Redis instead of memory |
 | `TRUST_PROXY` | Number of proxies in front of the app (default `1`) |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email delivery for password resets |
+| `LOG_LEVEL`, `LOG_FORMAT` | Optional. Log level (default `info`); `LOG_FORMAT=json` turns off pretty-printing in a terminal |
 | `MAX_FILE_SIZE_MB`, `UPLOAD_DIR`, `PORT` | Optional |
 
 ## API
+
+**Health**
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/healthz` | `{ status, mongo, redis, uptimeSeconds }` |
 
 **Shares**
 
@@ -100,17 +140,20 @@ npm test               # runs against an in-memory MongoDB, no setup needed
 | `GET` | `/api/me/shares/:code` | One share, with content and download links; doesn't use a view |
 | `DELETE` | `/api/me/shares/:code` | Active: stop it now. Ended: remove it from the list |
 
-Errors are JSON: `{ "error": "message", "field"?: "name" }`. An expired session returns `401` with `"code": "token_expired"`; refresh and retry.
+Errors are JSON: `{ "error": "message", "field"?: "name" }`. An expired session returns `401` with `"code": "token_expired"`; refresh and retry. `429` responses include `Retry-After`; `500` responses include `requestId`.
 
 ## Project structure
 
 ```
-server.js              Startup: connects to MongoDB, syncs indexes, starts the cleanup job and the server
+server.js              Startup and graceful shutdown: MongoDB, Redis, indexes, cleanup job, HTTP server
+Dockerfile             Production image
+docker-compose.yml     App + MongoDB + Redis for local development
+railway.json           Railway build and health check settings
 src/
   app.js               Express app (middleware, routers, CSRF check, error handling)
   config.js            Settings and limits
   models/              Share, User, RefreshToken
-  routes/              shares.js, auth.js, me.js
+  routes/              shares.js, auth.js, me.js, health.js
   lib/
     auth.js            Sessions: JWT access tokens, rotating refresh tokens, auth middleware
     shares.js          Share lifecycle: serializing, ending, status
@@ -120,7 +163,16 @@ src/
     storage.js         File storage
     cleanup.js         Expiry and orphan-file cleanup
     mailer.js          Email (Resend)
-    ...                validate, rateLimit, errors, urls
+    logger.js          Pino logger
+    requestLogging.js  Request logs, request IDs, URL redaction
+    redis.js           Redis connection
+    rateLimit.js       Per-IP rate limits (Redis or memory)
+    attempts.js        Per-target brute-force lockouts (Redis or memory)
+    ...                validate, errors, urls
 public/                Frontend: home, login, signup, forgot/reset password, My shares, account
 test/                  API tests
 ```
+
+## Roadmap
+
+- **v3:** object storage with MinIO (S3-compatible): direct browser uploads via presigned URLs, larger files, and files that survive redeploys
