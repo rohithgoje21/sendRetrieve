@@ -1,6 +1,7 @@
 const Share = require("../models/Share");
 const { deleteFiles, listStoredFiles } = require("./storage");
 const { endShares } = require("./shares");
+const log = require("./logger").logger.child({ component: "cleanup" });
 
 // Files younger than this may belong to an upload that hasn't been saved to
 // the database yet, so the orphan sweep leaves them alone.
@@ -33,12 +34,12 @@ const runCleanup = async () => {
     const shares = await deleteExpiredShares();
     const orphans = await deleteOrphanFiles();
     if (shares || orphans) {
-        console.log(`Cleanup: ended ${shares} expired share(s), removed ${orphans} orphan file(s)`);
+        log.info({ event: "cleanup.completed", sharesEnded: shares, orphanFilesRemoved: orphans }, "Cleanup completed");
     }
 };
 
 const startCleanupJob = (intervalMs) => {
-    const tick = () => runCleanup().catch((err) => console.error("Cleanup failed:", err));
+    const tick = () => runCleanup().catch((err) => log.error({ err, event: "cleanup.failed" }, "Cleanup failed"));
     tick();
     return setInterval(tick, intervalMs).unref();
 };

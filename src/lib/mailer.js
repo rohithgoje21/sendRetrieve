@@ -1,10 +1,12 @@
 const config = require("../config");
+const { logger } = require("./logger");
 
 // Sends email through Resend's HTTP API. Without RESEND_API_KEY the message is
-// printed to the console instead, which is enough for local development.
+// written to the log instead, which is enough for local development (the
+// server warns about this at startup in production).
 const sendMail = async ({ to, subject, text, html }) => {
     if (!config.email.resendApiKey) {
-        console.log(`\n[email] To: ${to}\n[email] Subject: ${subject}\n${text}\n`);
+        logger.info({ event: "email.logged", to, subject }, `Email not sent (no RESEND_API_KEY):\n${text}`);
         return;
     }
 

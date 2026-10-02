@@ -32,13 +32,15 @@ const statusFilter = (ownerId, status) => {
     }
 };
 
-const verifyPassword = async (user, password) => {
-    if (!(await bcrypt.compare(password, user.passwordHash))) {
-        throw new HttpError(401, "Incorrect password", { field: "password" });
+// Throws 401 (blaming `field`) unless `password` is the user's password.
+const verifyPassword = async (req, password, { field, message }) => {
+    if (!(await bcrypt.compare(password, req.user.passwordHash))) {
+        req.log.warn({ event: "account.password_check_failed", field }, "Wrong current password");
+        throw new HttpError(401, message, { field });
     }
 };
 
-const createMeRouter = ({ rateLimit = true } = {}) => {
+const createMeRouter = (ctx) => {
     const router = express.Router();
     router.use(requireAuth);
 
@@ -52,12 +54,13 @@ const createMeRouter = ({ rateLimit = true } = {}) => {
 
     router.post(
         "/password",
-        limiter(rateLimit, { limit: 10, error: "Too many attempts. Please wait a few minutes." }),
+        limiter(ctx, { name: "change-password", limit: 10, error: "Too many attempts. Please wait a few minutes." }),
         validateBody(schemas.changePassword),
         async (req, res) => {
             const { currentPassword, newPassword } = req.body;
-            await verifyPassword(req.user, currentPassword).catch(() => {
-                throw new HttpError(401, "Current password is incorrect", { field: "currentPassword" });
+            await verifyPassword(req, currentPassword, {
+                field: "currentPassword",
+                message: "Current password is incorrect",
             });
 
             req.user.passwordHash = await bcrypt.hash(newPassword, config.bcryptRounds);
@@ -65,6 +68,7 @@ const createMeRouter = ({ rateLimit = true } = {}) => {
 
             // Log out everywhere else; keep this browser signed in.
             await revokeAllSessions(req.user);
+            req.log.info({ event: "account.password_changed" }, "Password changed");
             await issueSession(req, res, req.user);
             res.json({ user: req.user.toPublic() });
         }
@@ -72,16 +76,17 @@ const createMeRouter = ({ rateLimit = true } = {}) => {
 
     router.delete(
         "/",
-        limiter(rateLimit, { limit: 10, error: "Too many attempts. Please wait a few minutes." }),
+        limiter(ctx, { name: "delete-account", limit: 10, error: "Too many attempts. Please wait a few minutes." }),
         validateBody(schemas.deleteAccount),
         async (req, res) => {
-            await verifyPassword(req.user, req.body.password);
+            await verifyPassword(req, req.body.password, { field: "password", message: "Incorrect password" });
 
             const shares = await Share.find({ ownerId: req.user._id }, { files: 1 }).lean();
             await deleteFiles(shares.flatMap((s) => s.files.map((f) => f.storedName)));
             await Share.deleteMany({ ownerId: req.user._id });
             await RefreshToken.deleteMany({ userId: req.user._id });
             await User.deleteOne({ _id: req.user._id });
+            req.log.info({ event: "account.deleted", sharesDeleted: shares.length }, "Account deleted");
 
             clearSession(req, res);
             res.status(204).end();
@@ -135,12 +140,17 @@ const createMeRouter = ({ rateLimit = true } = {}) => {
     // Ended share: remove it from history for good.
     router.delete("/shares/:code", async (req, res) => {
         const share = await findOwnedShare(req);
-        if (shareStatus(share) === "active") {
+        const wasActive = shareStatus(share) === "active";
+        if (wasActive) {
             await endShares([share], "deleted");
         } else {
             await deleteFiles(share.files.map((f) => f.storedName));
             await Share.deleteOne({ _id: share._id });
         }
+        req.log.info(
+            { event: wasActive ? "share.deleted" : "share.removed_from_history", shareId: share._id },
+            wasActive ? "Share deleted by owner" : "Ended share removed from history"
+        );
         res.status(204).end();
     });
 

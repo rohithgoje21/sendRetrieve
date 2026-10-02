@@ -26,12 +26,12 @@ const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", config.bcryptRounds);
 const FORGOT_PASSWORD_MESSAGE =
     "If an account exists for that email, we've sent a link to reset the password.";
 
-const createAuthRouter = ({ rateLimit = true } = {}) => {
+const createAuthRouter = (ctx) => {
     const router = express.Router();
 
     router.post(
         "/register",
-        limiter(rateLimit, { limit: 10, windowMinutes: 60, error: "Too many sign-ups. Please try again later." }),
+        limiter(ctx, { name: "register", limit: 10, windowMinutes: 60, error: "Too many sign-ups. Please try again later." }),
         validateBody(schemas.register),
         async (req, res) => {
             const { name, email, password } = req.body;
@@ -46,6 +46,7 @@ const createAuthRouter = ({ rateLimit = true } = {}) => {
                 if (err.code === 11000) throw new HttpError(409, "An account with this email already exists");
                 throw err;
             }
+            req.log.info({ event: "auth.registered", userId: user._id }, "Account created");
             await issueSession(req, res, user);
             res.status(201).json({ user: user.toPublic() });
         }
@@ -53,14 +54,26 @@ const createAuthRouter = ({ rateLimit = true } = {}) => {
 
     router.post(
         "/login",
-        limiter(rateLimit, { limit: 20, error: "Too many login attempts. Please wait a few minutes." }),
+        limiter(ctx, { name: "login", limit: 20, error: "Too many login attempts. Please wait a few minutes." }),
         validateBody(schemas.login),
         async (req, res) => {
             const { email, password } = req.body;
+            // Counted per email whether or not the account exists, so a
+            // lockout doesn't reveal which emails are registered.
+            await ctx.attempts.assertNotLocked("login", email, "Too many failed login attempts for this account.");
+
             const user = await User.findOne({ email });
             const valid = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
-            if (!user || !valid) throw new HttpError(401, "Incorrect email or password");
+            if (!user || !valid) {
+                const locked = await ctx.attempts.recordFailure("login", email);
+                const userId = user?._id ?? null;
+                req.log.warn({ event: "auth.login_failed", userId }, "Login failed");
+                if (locked) req.log.warn({ event: "auth.locked", userId }, "Login locked after repeated failures");
+                throw new HttpError(401, "Incorrect email or password");
+            }
 
+            await ctx.attempts.reset("login", email);
+            req.log.info({ event: "auth.login", userId: user._id }, "Logged in");
             await issueSession(req, res, user);
             res.json({ user: user.toPublic() });
         }
@@ -68,7 +81,7 @@ const createAuthRouter = ({ rateLimit = true } = {}) => {
 
     router.post(
         "/refresh",
-        limiter(rateLimit, { limit: 120, error: "Too many requests. Please wait a few minutes." }),
+        limiter(ctx, { name: "refresh", limit: 120, error: "Too many requests. Please wait a few minutes." }),
         async (req, res) => {
             const user = await rotateSession(req, res);
             if (!user) {
@@ -91,10 +104,11 @@ const createAuthRouter = ({ rateLimit = true } = {}) => {
 
     router.post(
         "/forgot-password",
-        limiter(rateLimit, { limit: 5, windowMinutes: 60, error: "Too many reset requests. Please try again later." }),
+        limiter(ctx, { name: "forgot-password", limit: 5, windowMinutes: 60, error: "Too many reset requests. Please try again later." }),
         validateBody(schemas.forgotPassword),
         async (req, res) => {
             const user = await User.findOne({ email: req.body.email });
+            req.log.info({ event: "auth.password_reset_requested", userId: user?._id ?? null }, "Password reset requested");
             if (user) {
                 const token = randomToken();
                 user.passwordResetTokenHash = hashToken(token);
@@ -105,7 +119,7 @@ const createAuthRouter = ({ rateLimit = true } = {}) => {
                 // Same response either way, so this endpoint can't be used to
                 // check whether an email has an account.
                 await mailer.sendPasswordResetEmail(user, link).catch((err) => {
-                    console.error("Failed to send password reset email:", err);
+                    req.log.error({ err, event: "email.failed", userId: user._id }, "Failed to send password reset email");
                 });
             }
             res.json({ message: FORGOT_PASSWORD_MESSAGE });
@@ -114,14 +128,17 @@ const createAuthRouter = ({ rateLimit = true } = {}) => {
 
     router.post(
         "/reset-password",
-        limiter(rateLimit, { limit: 10, error: "Too many attempts. Please wait a few minutes." }),
+        limiter(ctx, { name: "reset-password", limit: 10, error: "Too many attempts. Please wait a few minutes." }),
         validateBody(schemas.resetPassword),
         async (req, res) => {
             const user = await User.findOne({
                 passwordResetTokenHash: hashToken(req.body.token),
                 passwordResetExpiresAt: { $gt: new Date() },
             });
-            if (!user) throw new HttpError(400, "This reset link is invalid or has expired. Request a new one.");
+            if (!user) {
+                req.log.warn({ event: "auth.password_reset_invalid" }, "Invalid or expired reset token");
+                throw new HttpError(400, "This reset link is invalid or has expired. Request a new one.");
+            }
 
             user.passwordHash = await bcrypt.hash(req.body.password, config.bcryptRounds);
             user.passwordResetTokenHash = null;
@@ -129,6 +146,7 @@ const createAuthRouter = ({ rateLimit = true } = {}) => {
             await user.save();
 
             await revokeAllSessions(user);
+            req.log.info({ event: "auth.password_reset", userId: user._id }, "Password reset");
             await issueSession(req, res, user);
             res.json({ user: user.toPublic() });
         }

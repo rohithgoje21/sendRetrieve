@@ -68,6 +68,23 @@ const config = {
     downloadWindowSeconds: 10 * 60,
 
     cleanupIntervalMs: 5 * 60 * 1000,
+
+    // Optional. Without it, rate limits and lockouts are kept in memory (lost
+    // on restart and not shared between instances).
+    redisUrl: process.env.REDIS_URL || null,
+
+    logLevel: process.env.LOG_LEVEL || (process.env.NODE_ENV === "test" ? "silent" : "info"),
+
+    // Per-target brute-force protection, on top of per-IP rate limits: after
+    // this many failures, a share's password or an account's login is locked
+    // for the rest of the window, whichever IPs the attempts come from.
+    lockout: {
+        maxFailedAttempts: 10,
+        windowSeconds: 15 * 60,
+    },
+
+    // How long in-flight requests get to finish on shutdown.
+    shutdownTimeoutMs: 10 * 1000,
 };
 
 module.exports = config;

@@ -77,6 +77,10 @@ const rotateSession = async (req, res) => {
             // A token that was already rotated away is being replayed: assume
             // it leaked and log out every session descended from that login.
             await RefreshToken.updateMany({ familyId: used.familyId, revokedAt: null }, { revokedAt: now });
+            req.log.warn(
+                { event: "auth.refresh_token_reuse", userId: used.userId, familyId: used.familyId },
+                "Refresh token reused; revoked that login on all devices"
+            );
         }
         return null;
     }

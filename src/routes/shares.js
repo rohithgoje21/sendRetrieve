@@ -62,12 +62,12 @@ const consumeView = async (share) => {
     return { viewsRemaining: updated.viewsRemaining, expiresAt };
 };
 
-const createSharesRouter = ({ rateLimit = true } = {}) => {
+const createSharesRouter = (ctx) => {
     const router = express.Router();
 
     router.post(
         "/shares",
-        limiter(rateLimit, { limit: 30, error: "Too many shares created. Please wait a few minutes." }),
+        limiter(ctx, { name: "create-share", limit: 30, error: "Too many shares created. Please wait a few minutes." }),
         optionalAuth,
         upload.array("files", config.limits.maxFiles),
         async (req, res) => {
@@ -95,6 +95,21 @@ const createSharesRouter = ({ rateLimit = true } = {}) => {
                     purgeAt: req.user ? null : new Date(expiresAt.getTime() + GUEST_PURGE_DELAY_MS),
                 });
 
+                req.log.info(
+                    {
+                        event: "share.created",
+                        shareId: share._id,
+                        owned: Boolean(req.user),
+                        fileCount: share.files.length,
+                        totalBytes: share.files.reduce((sum, f) => sum + f.size, 0),
+                        hasText: Boolean(text),
+                        expiresIn,
+                        maxViews,
+                        passwordProtected: Boolean(password),
+                    },
+                    "Share created"
+                );
+
                 res.status(201).json({
                     code: share.code,
                     url: `${baseUrl(req)}/s/${share.code}`,
@@ -113,7 +128,7 @@ const createSharesRouter = ({ rateLimit = true } = {}) => {
 
     router.post(
         "/shares/:code/open",
-        limiter(rateLimit, { limit: 60, error: "Too many attempts. Please wait a few minutes." }),
+        limiter(ctx, { name: "open-share", limit: 60, error: "Too many attempts. Please wait a few minutes." }),
         validateBody(schemas.openShare),
         async (req, res) => {
             const code = normalizeCode(req.params.code);
@@ -131,13 +146,24 @@ const createSharesRouter = ({ rateLimit = true } = {}) => {
                 if (!password) {
                     throw new HttpError(401, "This share is password protected", { passwordRequired: true });
                 }
+
+                const shareId = String(share._id);
+                await ctx.attempts.assertNotLocked("share", shareId, "Too many wrong passwords for this share.");
                 if (!(await bcrypt.compare(password, share.passwordHash))) {
+                    const locked = await ctx.attempts.recordFailure("share", shareId);
+                    req.log.warn({ event: "share.password_failed", shareId }, "Wrong share password");
+                    if (locked) req.log.warn({ event: "share.locked", shareId }, "Share locked after repeated wrong passwords");
                     throw new HttpError(401, "Incorrect password", { passwordRequired: true });
                 }
+                await ctx.attempts.reset("share", shareId);
             }
 
             const state = await consumeView(share);
             if (!state) throw new HttpError(404, NOT_FOUND_MESSAGE);
+            req.log.info(
+                { event: "share.opened", shareId: share._id, viewsRemaining: state.viewsRemaining },
+                "Share opened"
+            );
 
             res.set("Cache-Control", "no-store");
             res.json({
@@ -154,7 +180,7 @@ const createSharesRouter = ({ rateLimit = true } = {}) => {
 
     router.get(
         "/files/:token",
-        limiter(rateLimit, { limit: 300, error: "Too many downloads. Please wait a few minutes." }),
+        limiter(ctx, { name: "download", limit: 300, error: "Too many downloads. Please wait a few minutes." }),
         async (req, res) => {
             const claims = verifyDownloadToken(req.params.token);
             if (!claims) {
@@ -171,6 +197,7 @@ const createSharesRouter = ({ rateLimit = true } = {}) => {
                     { _id: share._id, "files._id": file._id },
                     { $inc: { "files.$.downloads": 1 } }
                 );
+                req.log.info({ event: "file.downloaded", shareId: share._id, fileId: file._id }, "File downloaded");
             }
 
             res.sendFile(filePath(file.storedName), {
