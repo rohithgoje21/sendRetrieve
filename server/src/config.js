@@ -1,6 +1,12 @@
-require("dotenv").config();
 const path = require("path");
 const crypto = require("crypto");
+
+// server/.env first; the repo-root .env is also read, for setups from before
+// the backend moved into server/. Real environment variables win over both.
+require("dotenv").config({
+    path: [path.join(__dirname, "..", ".env"), path.join(__dirname, "..", "..", ".env")],
+    quiet: true,
+});
 
 const HOUR = 60 * 60;
 
@@ -9,6 +15,8 @@ const config = {
     port: Number(process.env.PORT) || 8080,
     mongoUri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/sendretrieve",
     uploadDir: process.env.UPLOAD_DIR || path.join(__dirname, "..", "uploads"),
+    // The built React app (npm run build), served by Express in production.
+    clientDir: process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "client", "dist"),
 
     // Signs download links and login sessions. Without a fixed secret, links
     // and sessions stop working when the server restarts.

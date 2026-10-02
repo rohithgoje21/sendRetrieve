@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const helmet = require("helmet");
@@ -7,12 +8,40 @@ const { createSharesRouter } = require("./routes/shares");
 const { createAuthRouter } = require("./routes/auth");
 const { createMeRouter } = require("./routes/me");
 const { createHealthRouter } = require("./routes/health");
+const { createConfigRouter } = require("./routes/config");
 const { createRequestLogger } = require("./lib/requestLogging");
 const { createAttemptTracker } = require("./lib/attempts");
 const { HttpError, errorHandler } = require("./lib/errors");
 
-const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+const CLIENT_NOT_BUILT =
+    "The React app hasn't been built. Run `npm run build` in the repo root, " +
+    "or use the dev server (`npm run dev`) at http://localhost:5173.";
+
+// Serves the built React app. Hashed files under /assets never change, so
+// browsers may cache them for a year; index.html is revalidated every time so
+// a new deploy is picked up. Other page paths (/, /shares, /s/CODE...) get
+// index.html and React Router renders the page. Paths that look like files
+// (/missing.png, /uploads/x.pdf) get a real 404 instead.
+const serveClient = (app) => {
+    const indexHtml = path.join(config.clientDir, "index.html");
+
+    app.use(
+        "/assets",
+        express.static(path.join(config.clientDir, "assets"), { immutable: true, maxAge: "1y", fallthrough: false })
+    );
+    app.use(express.static(config.clientDir, { index: false }));
+    app.use((req, res, next) => {
+        if (req.method !== "GET" && req.method !== "HEAD") return next();
+        if (path.extname(req.path)) return next();
+        if (!fs.existsSync(indexHtml)) return res.status(503).type("text").send(CLIENT_NOT_BUILT);
+        res.sendFile(indexHtml, { headers: { "Cache-Control": "no-cache" } });
+    });
+    app.use(() => {
+        throw new HttpError(404, "Not found");
+    });
+};
 
 // CSRF defense on top of SameSite=Strict cookies: reject state-changing
 // requests that a browser marks as coming from another site.
@@ -54,15 +83,13 @@ const createApp = ({ rateLimit = true, redis = null, logger } = {}) => {
     app.use("/api", sameOriginOnly);
     app.use("/api/auth", createAuthRouter(ctx));
     app.use("/api/me", createMeRouter(ctx));
+    app.use("/api", createConfigRouter());
     app.use("/api", createSharesRouter(ctx));
     app.use("/api", () => {
         throw new HttpError(404, "Not found");
     });
 
-    // /login serves login.html, /shares serves shares.html, etc.
-    app.use(express.static(PUBLIC_DIR, { extensions: ["html"] }));
-    // Share links: the page reads the code from the URL and pre-fills it.
-    app.get("/s/:code", (req, res) => res.sendFile(path.join(PUBLIC_DIR, "index.html")));
+    serveClient(app);
 
     app.use(errorHandler);
     return app;

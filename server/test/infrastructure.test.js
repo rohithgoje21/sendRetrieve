@@ -102,7 +102,7 @@ describe("logging", () => {
         const downloadToken = opened.body.files[0].downloadUrl.split("/").pop();
         await request(logged).get(`/api/files/${downloadToken}`).expect(200);
         await request(logged).get("/reset-password?token=reset-secret-123").expect(200);
-        await request(logged).get("/style.css").expect(200);
+        await request(logged).get("/assets/index-abc123.js").expect(200);
         await request(logged).get("/healthz").expect(200);
 
         const output = JSON.stringify(lines);

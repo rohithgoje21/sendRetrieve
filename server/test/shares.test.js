@@ -215,14 +215,57 @@ describe("cleanup", () => {
     });
 });
 
-describe("pages", () => {
-    test("share links serve the app", async () => {
-        const res = await request(app).get("/s/ABCD2345").expect(200);
-        expect(res.text).toContain("sendRetrieve");
+describe("serving the React app", () => {
+    test("every page path gets index.html, for client-side routing", async () => {
+        for (const page of ["/", "/s/ABCD2345", "/open", "/shares", "/reset-password?token=x", "/no/such/page"]) {
+            const res = await request(app).get(page).expect(200);
+            expect(res.text).toContain('<div id="root">');
+            expect(res.headers["cache-control"]).toBe("no-cache");
+        }
     });
 
-    test("unknown API routes return JSON 404", async () => {
+    test("hashed assets are cached for a year; missing ones are 404", async () => {
+        const res = await request(app).get("/assets/index-abc123.js").expect(200);
+        expect(res.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+        await request(app).get("/assets/missing.js").expect(404);
+        await request(app).get("/favicon.svg").expect(200);
+        await request(app).get("/missing.png").expect(404); // file-like paths don't get the app
+    });
+
+    test("without a build, pages explain how to build or run the dev server", async () => {
+        const config = require("../src/config");
+        const original = config.clientDir;
+        config.clientDir = path.join(original, "does-not-exist");
+        try {
+            const res = await request(require("../src/app").createApp({ rateLimit: false })).get("/").expect(503);
+            expect(res.text).toMatch(/npm run build/);
+        } finally {
+            config.clientDir = original;
+        }
+    });
+
+    test("the page is served with a strict Content-Security-Policy", async () => {
+        const res = await request(app).get("/").expect(200);
+        expect(res.headers["content-security-policy"]).toContain("script-src 'self'");
+    });
+
+    test("unknown API routes return JSON 404, not the app", async () => {
         const res = await request(app).get("/api/nope").expect(404);
         expect(res.body.error).toBe("Not found");
+    });
+});
+
+describe("GET /api/config", () => {
+    test("exposes the limits and options the frontend needs", async () => {
+        const res = await request(app).get("/api/config").expect(200);
+        expect(res.body).toMatchObject({
+            maxFiles: 10,
+            maxFileSizeBytes: 50 * 1024 * 1024,
+            defaultExpiry: "24h",
+            viewLimitOptions: [1, 5, 10],
+            sharePassword: { min: 4, max: 72 },
+            accountPassword: { min: 8, max: 72 },
+        });
+        expect(res.body.expiryOptions).toContainEqual({ value: "7d", label: "7 days" });
     });
 });
