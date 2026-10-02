@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Account · sendRetrieve</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+    <div class="topbar">
+        <a href="/" class="brand">sendRetrieve</a>
+        <nav class="site-nav" id="siteNav" aria-label="Account"></nav>
+    </div>
+
+    <main class="container">
+        <header class="page-header">
+            <h1>Account</h1>
+        </header>
+
+        <section class="card">
+            <h2 class="card-title">Profile</h2>
+            <form id="profileForm" novalidate>
+                <label class="label" for="name">Name</label>
+                <input type="text" id="name" autocomplete="name" maxlength="60" required>
+                <label class="label" for="email">Email</label>
+                <input type="email" id="email" readonly>
+                <p class="hint" id="memberSince"></p>
+                <p class="error" id="profileError" role="alert" hidden></p>
+                <p class="success" id="profileSuccess" role="status" hidden></p>
+                <button type="submit" class="primary">Save</button>
+            </form>
+        </section>
+
+        <section class="card">
+            <h2 class="card-title">Change password</h2>
+            <form id="passwordForm" novalidate>
+                <label class="label" for="currentPassword">Current password</label>
+                <input type="password" id="currentPassword" autocomplete="current-password" required>
+                <label class="label" for="newPassword">New password</label>
+                <input type="password" id="newPassword" autocomplete="new-password" minlength="8" maxlength="72" required>
+                <p class="hint">At least 8 characters. You'll stay logged in here and be logged out everywhere else.</p>
+                <p class="error" id="passwordError" role="alert" hidden></p>
+                <p class="success" id="passwordSuccess" role="status" hidden></p>
+                <button type="submit" class="primary">Change password</button>
+            </form>
+        </section>
+
+        <section class="card danger-zone">
+            <h2 class="card-title">Delete account</h2>
+            <p class="hint">Deletes your account and every share you've created, including their files. This can't be undone.</p>
+            <form id="deleteForm" novalidate>
+                <label class="label" for="deletePassword">Password</label>
+                <input type="password" id="deletePassword" autocomplete="current-password" required>
+                <p class="error" id="deleteError" role="alert" hidden></p>
+                <button type="submit" class="danger">Delete my account</button>
+            </form>
+        </section>
+    </main>
+
+    <script src="/common.js"></script>
+    <script src="/account.js"></script>
+</body>
+
+</html>

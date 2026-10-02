@@ -6,14 +6,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>sendRetrieve</title>
     <meta name="description" content="Share text and files temporarily with a short code." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/style.css" />
 </head>
 
 <body>
+    <div class="topbar">
+        <a href="/" class="brand">sendRetrieve</a>
+        <nav class="site-nav" id="siteNav" aria-label="Account"></nav>
+    </div>
+
     <main class="container">
         <header class="header">
-            <h1>sendRetrieve</h1>
-            <p class="tagline">Share text and files with a short code. They delete themselves when they expire.</p>
+            <h1>Share text and files</h1>
+            <p class="tagline">Get a short code. Shares delete themselves when they expire.</p>
         </header>
 
         <nav class="tabs" role="tablist">
@@ -68,6 +74,7 @@
                 </div>
 
                 <button type="submit" class="primary" id="sendBtn">Send</button>
+                <p class="hint center" id="sendAccountHint"></p>
             </form>
 
             <div class="result" id="sendResult" hidden>
@@ -81,6 +88,7 @@
                     <button type="button" class="secondary" data-copy="shareLink">Copy link</button>
                 </div>
                 <p class="meta" id="shareMeta"></p>
+                <p class="meta" id="sharedToAccount" hidden>Saved to <a href="/shares">My shares</a>, where you can track or delete it.</p>
                 <button type="button" class="ghost" id="newShareBtn">Send something else</button>
             </div>
         </section>
@@ -118,6 +126,7 @@
         </section>
     </main>
 
+    <script src="/common.js"></script>
     <script src="/script.js"></script>
 </body>
 

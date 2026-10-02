@@ -1,36 +1,7 @@
+// Home page: send and retrieve. Helpers ($, el, api, session, ...) come from common.js.
+
 const MAX_FILES = 10;
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
-
-const $ = (id) => document.getElementById(id);
-
-const formatSize = (bytes) => {
-    if (bytes < 1024) return `${bytes} B`;
-    const units = ["KB", "MB", "GB"];
-    let value = bytes / 1024;
-    let unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
-        value /= 1024;
-        unit++;
-    }
-    return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
-};
-
-const formatDate = (iso) =>
-    new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-
-// "7KX92PMQ" -> "7KX9-2PMQ" for display; the server accepts either form.
-const formatCode = (code) => `${code.slice(0, 4)}-${code.slice(4)}`;
-
-const showError = (el, message) => {
-    el.textContent = message;
-    el.hidden = !message;
-};
-
-const el = (tag, props = {}, children = []) => {
-    const node = Object.assign(document.createElement(tag), props);
-    node.append(...children);
-    return node;
-};
 
 /* ---------- Tabs ---------- */
 
@@ -48,29 +19,20 @@ const selectTab = (name) => {
 tabs.send.addEventListener("click", () => selectTab("send"));
 tabs.retrieve.addEventListener("click", () => selectTab("retrieve"));
 
-/* ---------- Copy buttons ---------- */
-
-document.addEventListener("click", async (event) => {
-    const button = event.target.closest("[data-copy]");
-    if (!button) return;
-    const source = $(button.dataset.copy);
-    const value = source.value ?? source.textContent;
-    try {
-        await navigator.clipboard.writeText(value);
-        const label = button.textContent;
-        button.textContent = "Copied!";
-        setTimeout(() => (button.textContent = label), 1200);
-    } catch (err) {
-        console.error("Failed to copy:", err);
-    }
-});
-
 /* ---------- Send ---------- */
 
 let selectedFiles = [];
 
 $("maxFiles").textContent = MAX_FILES;
 $("maxSize").textContent = formatSize(MAX_FILE_SIZE);
+
+session.ready.then((user) => {
+    $("sendAccountHint").replaceChildren(
+        ...(user
+            ? ["Signed in: this share will appear in ", el("a", { href: "/shares", textContent: "My shares" }), "."]
+            : [el("a", { href: "/login", textContent: "Log in" }), " to keep track of your shares and delete them early."])
+    );
+});
 
 const renderFileList = () => {
     const list = $("fileList");
@@ -153,9 +115,9 @@ const uploadShare = (formData, onProgress) =>
         xhr.addEventListener("load", () => {
             const body = xhr.response || {};
             if (xhr.status >= 200 && xhr.status < 300) resolve(body);
-            else reject(new Error(body.error || `Upload failed (${xhr.status})`));
+            else reject(new ApiError(body.error || `Upload failed (${xhr.status})`, xhr.status, body));
         });
-        xhr.addEventListener("error", () => reject(new Error("Network error. Check your connection.")));
+        xhr.addEventListener("error", () => reject(new ApiError("Network error. Check your connection.", 0, {})));
         xhr.send(formData);
     });
 
@@ -182,21 +144,31 @@ $("sendForm").addEventListener("submit", async (event) => {
 
     const sendBtn = $("sendBtn");
     const progress = $("uploadProgress");
-    sendBtn.disabled = true;
-    sendBtn.textContent = "Sending…";
+    setBusy(sendBtn, true, "Sending…");
     progress.hidden = selectedFiles.length === 0;
+    const onProgress = (loaded, total) => {
+        $("uploadProgressBar").style.width = `${(loaded / total) * 100}%`;
+        $("uploadProgressLabel").textContent = `${formatSize(loaded)} / ${formatSize(total)}`;
+    };
 
     try {
-        const result = await uploadShare(formData, (loaded, total) => {
-            $("uploadProgressBar").style.width = `${(loaded / total) * 100}%`;
-            $("uploadProgressLabel").textContent = `${formatSize(loaded)} / ${formatSize(total)}`;
-        });
+        // Signed in? Make sure the session is fresh so the share is saved to
+        // the account rather than rejected after a long upload.
+        if (await session.ready) await loadUser();
+
+        let result;
+        try {
+            result = await uploadShare(formData, onProgress);
+        } catch (err) {
+            if (err.data?.code !== "token_expired") throw err;
+            await refreshSession();
+            result = await uploadShare(formData, onProgress);
+        }
         showSendResult(result);
     } catch (err) {
         showError(errorEl, err.message);
     } finally {
-        sendBtn.disabled = false;
-        sendBtn.textContent = "Send";
+        setBusy(sendBtn, false);
         progress.hidden = true;
         $("uploadProgressBar").style.width = "0";
     }
@@ -211,6 +183,7 @@ const showSendResult = (result) => {
     else if (result.maxViews) details.push(`can be opened ${result.maxViews} times`);
     if (result.passwordProtected) details.push("password protected");
     $("shareMeta").textContent = details.join(" · ");
+    $("sharedToAccount").hidden = !result.owned;
 
     $("sendForm").hidden = true;
     $("sendResult").hidden = false;
@@ -298,33 +271,26 @@ $("retrieveForm").addEventListener("submit", async (event) => {
     $("retrieveResult").hidden = true;
 
     const button = $("retrieveBtn");
-    button.disabled = true;
-    button.textContent = "Opening…";
+    setBusy(button, true, "Opening…");
 
     try {
-        const response = await fetch(`/api/shares/${encodeURIComponent(code)}/open`, {
+        const share = await api(`/api/shares/${encodeURIComponent(code)}/open`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(password ? { password } : {}),
+            body: password ? { password } : {},
         });
-        const body = await response.json().catch(() => ({}));
-
-        if (response.ok) {
-            showRetrieveResult(body);
-        } else if (body.passwordRequired) {
+        showRetrieveResult(share);
+    } catch (err) {
+        if (err.data?.passwordRequired) {
             const wasHidden = passwordField.hidden;
             passwordField.hidden = false;
             $("retrievePassword").focus();
             // First prompt isn't an error, just a request for the password.
-            showError(errorEl, wasHidden ? "" : body.error);
+            showError(errorEl, wasHidden ? "" : err.message);
         } else {
-            showError(errorEl, body.error || "Something went wrong. Please try again.");
+            showError(errorEl, err.message);
         }
-    } catch {
-        showError(errorEl, "Network error. Check your connection.");
     } finally {
-        button.disabled = false;
-        button.textContent = "Open";
+        setBusy(button, false);
     }
 });
 
