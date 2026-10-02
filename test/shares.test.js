@@ -1,37 +1,11 @@
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
-
-process.env.UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "sendretrieve-test-"));
-process.env.TOKEN_SECRET = "test-secret";
-
-const mongoose = require("mongoose");
+const { app, uploadDir, storedFiles, useTestDatabase } = require("./helpers");
 const request = require("supertest");
-const { MongoMemoryServer } = require("mongodb-memory-server");
-const { createApp } = require("../src/app");
 const Share = require("../src/models/Share");
 const { deleteExpiredShares, deleteOrphanFiles } = require("../src/lib/cleanup");
 
-let mongo;
-const app = createApp({ rateLimit: false });
-const uploadDir = process.env.UPLOAD_DIR;
-const storedFiles = () => fs.readdirSync(uploadDir);
-
-beforeAll(async () => {
-    mongo = await MongoMemoryServer.create();
-    await mongoose.connect(mongo.getUri());
-});
-
-afterEach(async () => {
-    await Share.deleteMany({});
-    for (const name of storedFiles()) fs.unlinkSync(path.join(uploadDir, name));
-});
-
-afterAll(async () => {
-    await mongoose.disconnect();
-    await mongo.stop();
-    fs.rmSync(uploadDir, { recursive: true, force: true });
-});
+useTestDatabase();
 
 const createShare = (fields = {}, files = []) => {
     const req = request(app).post("/api/shares");
