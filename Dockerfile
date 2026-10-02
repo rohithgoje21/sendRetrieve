@@ -1,20 +1,38 @@
 # syntax=docker/dockerfile:1
+# One image for the whole MERN app: the Express API (server/) serves the built
+# React app (client/dist).
 
-# ---- Dependencies (production only) ----
-FROM node:24-alpine AS deps
+# ---- Build the React client ----
+FROM node:24-alpine AS client
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+COPY client/package.json client/
+COPY server/package.json server/
+RUN npm ci --workspace client
+COPY client client
+RUN npm run build --workspace client
+
+# ---- Server dependencies (production only) ----
+FROM node:24-alpine AS server-deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY client/package.json client/
+COPY server/package.json server/
+RUN npm ci --workspace server --omit=dev && npm cache clean --force \
+    && mkdir -p server/node_modules
 
 # ---- Runtime ----
 FROM node:24-alpine
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    CLIENT_DIR=/app/client/dist \
+    UPLOAD_DIR=/app/uploads
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json server.js ./
-COPY src ./src
-COPY public ./public
+COPY --from=server-deps /app/node_modules ./node_modules
+COPY --from=server-deps /app/server/node_modules ./server/node_modules
+COPY server/package.json server/server.js ./server/
+COPY server/src ./server/src
+COPY --from=client /app/client/dist ./client/dist
 
 # Uploaded files live here until object storage arrives; mount a volume to
 # keep them across container restarts.
@@ -27,4 +45,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # Run node directly rather than through npm, so it receives SIGTERM and can
 # shut down gracefully.
+WORKDIR /app/server
 CMD ["node", "server.js"]
