@@ -1,23 +1,26 @@
 const Share = require("../models/Share");
 const { deleteFiles, listStoredFiles } = require("./storage");
+const { endShares } = require("./shares");
 
 // Files younger than this may belong to an upload that hasn't been saved to
 // the database yet, so the orphan sweep leaves them alone.
 const ORPHAN_MIN_AGE_MS = 60 * 60 * 1000;
 
+// Ends shares whose time is up: files and content are deleted; guest shares
+// disappear entirely, owned shares stay in the owner's history.
 const deleteExpiredShares = async () => {
-    const expired = await Share.find({ expiresAt: { $lte: new Date() } }, { files: 1 }).lean();
-    if (expired.length === 0) return 0;
-
-    await deleteFiles(expired.flatMap((s) => s.files.map((f) => f.storedName)));
-    await Share.deleteMany({ _id: { $in: expired.map((s) => s._id) } });
+    const expired = await Share.find(
+        { endedAt: null, expiresAt: { $lte: new Date() } },
+        { files: 1, ownerId: 1, viewsRemaining: 1 }
+    ).lean();
+    await endShares(expired);
     return expired.length;
 };
 
-// Removes files on disk that no share references (e.g. left behind by the TTL
-// backstop or a crashed upload).
+// Removes files on disk that no live share references (e.g. left behind by
+// the TTL backstop or a crashed upload).
 const deleteOrphanFiles = async () => {
-    const referenced = new Set(await Share.distinct("files.storedName"));
+    const referenced = new Set(await Share.distinct("files.storedName", { endedAt: null }));
     const cutoff = Date.now() - ORPHAN_MIN_AGE_MS;
     const orphans = (await listStoredFiles())
         .filter((f) => !referenced.has(f.name) && f.modifiedAt.getTime() < cutoff)
@@ -30,7 +33,7 @@ const runCleanup = async () => {
     const shares = await deleteExpiredShares();
     const orphans = await deleteOrphanFiles();
     if (shares || orphans) {
-        console.log(`Cleanup: removed ${shares} expired share(s), ${orphans} orphan file(s)`);
+        console.log(`Cleanup: ended ${shares} expired share(s), removed ${orphans} orphan file(s)`);
     }
 };
 

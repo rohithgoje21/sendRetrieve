@@ -10,9 +10,35 @@ const config = {
     mongoUri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/sendretrieve",
     uploadDir: process.env.UPLOAD_DIR || path.join(__dirname, "..", "uploads"),
 
-    // Signs short-lived download links. Without a fixed secret, links stop
-    // working when the server restarts (shares themselves are unaffected).
+    // Signs download links and login sessions. Without a fixed secret, links
+    // and sessions stop working when the server restarts.
     tokenSecret: process.env.TOKEN_SECRET || crypto.randomBytes(32).toString("hex"),
+
+    // Public URL used in emailed links, e.g. https://sendretrieve.up.railway.app.
+    // Falls back to the request's host, which is fine locally but should be set
+    // in production so a forged Host header can't redirect reset links.
+    appUrl: process.env.APP_URL ? process.env.APP_URL.replace(/\/+$/, "") : null,
+
+    email: {
+        resendApiKey: process.env.RESEND_API_KEY || null,
+        from: process.env.EMAIL_FROM || "sendRetrieve <onboarding@resend.dev>",
+    },
+
+    auth: {
+        accessTokenTtlSeconds: 15 * 60,
+        refreshTokenTtlSeconds: 30 * 24 * HOUR,
+        passwordResetTtlSeconds: 30 * 60,
+        minPasswordLength: 8,
+        maxPasswordLength: 72,
+        maxNameLength: 60,
+    },
+
+    // Lower in tests so the suite isn't dominated by hashing time.
+    bcryptRounds: process.env.NODE_ENV === "test" ? 4 : 12,
+
+    // Shares owned by an account stay visible (without their content) under
+    // "Expired"/"Deleted" for this long before being removed for good.
+    endedShareRetentionSeconds: 30 * 24 * HOUR,
 
     // Number of reverse proxies in front of the app (Railway = 1). Needed so
     // rate limiting sees the client IP instead of the proxy's.

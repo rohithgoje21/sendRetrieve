@@ -1,70 +1,28 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const contentDisposition = require("content-disposition");
-const { rateLimit } = require("express-rate-limit");
 const config = require("../config");
 const Share = require("../models/Share");
+const schemas = require("../lib/schemas");
 const { generateCode, normalizeCode } = require("../lib/codes");
-const { createDownloadToken, verifyDownloadToken } = require("../lib/tokens");
+const { verifyDownloadToken } = require("../lib/tokens");
 const { upload, filePath, deleteFiles } = require("../lib/storage");
 const { HttpError } = require("../lib/errors");
-
-// Only types a browser renders as media are ever served inline. Everything
-// else (HTML, SVG, PDF, ...) is forced to download so an uploaded file can't
-// run script on this origin.
-const PREVIEWABLE_TYPES = new Set([
-    "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
-    "video/mp4", "video/webm", "video/ogg",
-    "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav", "audio/webm", "audio/mp4", "audio/aac",
-]);
+const { parse, validateBody } = require("../lib/validate");
+const { limiter } = require("../lib/rateLimit");
+const { optionalAuth } = require("../lib/auth");
+const { baseUrl } = require("../lib/urls");
+const { PREVIEWABLE_TYPES, liveFilter, serializeFile } = require("../lib/shares");
 
 const NOT_FOUND_MESSAGE = "Share not found. It may have expired or reached its view limit.";
 
-const limiter = (enabled, limit, error) =>
-    rateLimit({
-        windowMs: 15 * 60 * 1000,
-        limit,
-        standardHeaders: "draft-7",
-        legacyHeaders: false,
-        message: { error },
-        skip: () => !enabled,
-    });
+// Guest shares have no history to keep, so they get a purge date right away
+// as a backstop for the cleanup job.
+const GUEST_PURGE_DELAY_MS = 60 * 60 * 1000;
 
 // Strip control characters and path separators; keep the name readable.
 const cleanFileName = (name) =>
     name.replace(/[\u0000-\u001f\u007f/\\]/g, "_").trim().slice(0, 255) || "file";
-
-const parseShareOptions = (body) => {
-    const { limits, expiryOptions, defaultExpiry, viewLimitOptions } = config;
-
-    const text = typeof body.text === "string" && body.text.trim() ? body.text : null;
-    if (text && text.length > limits.maxTextLength) {
-        throw new HttpError(400, `Text must be ${limits.maxTextLength.toLocaleString()} characters or fewer`);
-    }
-
-    const expiresIn = body.expiresIn || defaultExpiry;
-    if (!Object.hasOwn(expiryOptions, expiresIn)) {
-        throw new HttpError(400, `expiresIn must be one of: ${Object.keys(expiryOptions).join(", ")}`);
-    }
-
-    let maxViews = null;
-    if (body.maxViews && body.maxViews !== "unlimited") {
-        maxViews = Number(body.maxViews);
-        if (!viewLimitOptions.includes(maxViews)) {
-            throw new HttpError(400, `maxViews must be one of: unlimited, ${viewLimitOptions.join(", ")}`);
-        }
-    }
-
-    const password = typeof body.password === "string" && body.password !== "" ? body.password : null;
-    if (password && (password.length < limits.minPasswordLength || password.length > limits.maxPasswordLength)) {
-        throw new HttpError(
-            400,
-            `Password must be ${limits.minPasswordLength}-${limits.maxPasswordLength} characters`
-        );
-    }
-
-    return { text, expiresIn, maxViews, password };
-};
 
 const insertWithUniqueCode = async (doc) => {
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -75,19 +33,6 @@ const insertWithUniqueCode = async (doc) => {
         }
     }
     throw new Error("Could not generate a unique share code");
-};
-
-const serializeFile = (code, file) => {
-    const token = createDownloadToken({ code, fileId: file._id });
-    const downloadUrl = `/api/files/${token}`;
-    return {
-        id: file._id,
-        name: file.originalName,
-        size: file.size,
-        mimeType: file.mimeType,
-        downloadUrl,
-        previewUrl: PREVIEWABLE_TYPES.has(file.mimeType) ? `${downloadUrl}?inline=1` : null,
-    };
 };
 
 // Counts one view. Returns the share's state after the view, or null if a
@@ -117,22 +62,25 @@ const consumeView = async (share) => {
     return { viewsRemaining: updated.viewsRemaining, expiresAt };
 };
 
-const createSharesRouter = ({ rateLimit: rateLimitEnabled = true } = {}) => {
+const createSharesRouter = ({ rateLimit = true } = {}) => {
     const router = express.Router();
 
     router.post(
         "/shares",
-        limiter(rateLimitEnabled, 30, "Too many shares created. Please wait a few minutes."),
+        limiter(rateLimit, { limit: 30, error: "Too many shares created. Please wait a few minutes." }),
+        optionalAuth,
         upload.array("files", config.limits.maxFiles),
         async (req, res) => {
             const uploaded = req.files || [];
             try {
-                const { text, expiresIn, maxViews, password } = parseShareOptions(req.body || {});
+                const { text, expiresIn, maxViews, password } = parse(schemas.createShare, req.body);
                 if (!text && uploaded.length === 0) {
                     throw new HttpError(400, "Add some text or at least one file");
                 }
 
+                const expiresAt = new Date(Date.now() + config.expiryOptions[expiresIn] * 1000);
                 const share = await insertWithUniqueCode({
+                    ownerId: req.user?._id ?? null,
                     text,
                     files: uploaded.map((f) => ({
                         originalName: cleanFileName(f.originalname),
@@ -140,18 +88,21 @@ const createSharesRouter = ({ rateLimit: rateLimitEnabled = true } = {}) => {
                         size: f.size,
                         mimeType: f.mimetype || "application/octet-stream",
                     })),
-                    passwordHash: password ? await bcrypt.hash(password, 10) : null,
+                    passwordHash: password ? await bcrypt.hash(password, config.bcryptRounds) : null,
+                    maxViews,
                     viewsRemaining: maxViews,
-                    expiresAt: new Date(Date.now() + config.expiryOptions[expiresIn] * 1000),
+                    expiresAt,
+                    purgeAt: req.user ? null : new Date(expiresAt.getTime() + GUEST_PURGE_DELAY_MS),
                 });
 
                 res.status(201).json({
                     code: share.code,
-                    url: `${req.protocol}://${req.get("host")}/s/${share.code}`,
+                    url: `${baseUrl(req)}/s/${share.code}`,
                     expiresAt: share.expiresAt,
                     maxViews,
                     passwordProtected: Boolean(password),
                     fileCount: share.files.length,
+                    owned: Boolean(req.user),
                 });
             } catch (err) {
                 await deleteFiles(uploaded.map((f) => f.filename)).catch(() => {});
@@ -162,21 +113,22 @@ const createSharesRouter = ({ rateLimit: rateLimitEnabled = true } = {}) => {
 
     router.post(
         "/shares/:code/open",
-        limiter(rateLimitEnabled, 60, "Too many attempts. Please wait a few minutes."),
+        limiter(rateLimit, { limit: 60, error: "Too many attempts. Please wait a few minutes." }),
+        validateBody(schemas.openShare),
         async (req, res) => {
             const code = normalizeCode(req.params.code);
             if (!code) throw new HttpError(404, NOT_FOUND_MESSAGE);
 
             const share = await Share.findOne({
                 code,
-                expiresAt: { $gt: new Date() },
+                ...liveFilter(),
                 $or: [{ viewsRemaining: null }, { viewsRemaining: { $gt: 0 } }],
             });
             if (!share) throw new HttpError(404, NOT_FOUND_MESSAGE);
 
             if (share.passwordHash) {
-                const password = req.body?.password;
-                if (typeof password !== "string" || password === "") {
+                const { password } = req.body;
+                if (!password) {
                     throw new HttpError(401, "This share is password protected", { passwordRequired: true });
                 }
                 if (!(await bcrypt.compare(password, share.passwordHash))) {
@@ -202,14 +154,14 @@ const createSharesRouter = ({ rateLimit: rateLimitEnabled = true } = {}) => {
 
     router.get(
         "/files/:token",
-        limiter(rateLimitEnabled, 300, "Too many downloads. Please wait a few minutes."),
+        limiter(rateLimit, { limit: 300, error: "Too many downloads. Please wait a few minutes." }),
         async (req, res) => {
             const claims = verifyDownloadToken(req.params.token);
             if (!claims) {
                 throw new HttpError(404, "This download link has expired. Open the share again to get a new one.");
             }
 
-            const share = await Share.findOne({ code: claims.code, expiresAt: { $gt: new Date() } });
+            const share = await Share.findOne({ code: claims.code, ...liveFilter() });
             const file = share?.files.id(claims.fileId);
             if (!file) throw new HttpError(404, NOT_FOUND_MESSAGE);
 
