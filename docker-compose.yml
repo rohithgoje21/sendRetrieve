@@ -1,0 +1,54 @@
+# Runs the whole stack locally:  docker compose up --build
+# App on http://localhost:8080 (change with APP_PORT). Values below can be
+# overridden from a .env file next to this one.
+
+name: sendretrieve
+
+services:
+  app:
+    build: .
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      PORT: 8080
+      MONGODB_URI: mongodb://mongo:27017/sendretrieve
+      REDIS_URL: redis://redis:6379
+      TOKEN_SECRET: ${TOKEN_SECRET:-local-dev-secret-change-me}
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      TRUST_PROXY: 0
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:8
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+  uploads:
