@@ -2,6 +2,8 @@
 
 Share text and files temporarily with a short code. Shares delete themselves when they expire. Use it as a guest, or create an account to track and manage what you've shared.
 
+A full-stack **MERN** application: **M**ongoDB, **E**xpress, **R**eact and **N**ode.js, with Redis for rate limiting, in one repository with a `client/` (React) and a `server/` (Express API).
+
 ## Features
 
 **Sharing**
@@ -20,6 +22,13 @@ Share text and files temporarily with a short code. Shares delete themselves whe
 - View your own share's content without using up a view; delete a share early
 - Expired and deleted shares stay listed (without content or files) for 30 days
 - Profile: change name or password, delete account and all its shares
+
+**Frontend**
+- React single-page app: client-side routing, code-split pages, light/dark theme
+- Server data cached and kept in sync with TanStack Query; expired sessions are refreshed and the request retried
+- Forms validated with Zod before they're sent; server errors shown on the field they belong to
+- Upload progress with cancel, inline previews, accessible dialogs and keyboard-friendly controls
+- Limits and options (file size, expiry choices) come from the server's `/api/config`, so they're defined once
 
 ## Security
 
@@ -46,16 +55,20 @@ Share text and files temporarily with a short code. Shares delete themselves whe
 
 ## Tech stack
 
-- **Frontend:** HTML, CSS, JavaScript
-- **Backend:** Node.js, Express 5, Multer, JSON Web Tokens, Zod
-- **Database:** MongoDB (Mongoose)
-- **Rate limits & lockouts:** Redis
-- **Logging:** Pino
-- **Email:** Resend
-- **Infrastructure:** Docker, Docker Compose, Railway
-- **Testing:** Jest, Supertest, mongodb-memory-server
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS, React Router, TanStack Query, React Hook Form, Zod |
+| Backend | Node.js, Express 5, Multer, JSON Web Tokens, Zod |
+| Database | MongoDB (Mongoose) |
+| Rate limits & lockouts | Redis |
+| Logging | Pino |
+| Email | Resend |
+| Infrastructure | Docker, Docker Compose, Railway |
+| Testing | Vitest + Testing Library (client), Jest + Supertest + mongodb-memory-server (server) |
 
 ## Running locally
+
+The repo is an npm workspace: one `npm install` at the root installs both `client/` and `server/`.
 
 ### With Docker (everything included)
 
@@ -63,32 +76,57 @@ Share text and files temporarily with a short code. Shares delete themselves whe
 docker compose up --build
 ```
 
-Starts the app on http://localhost:8080 with MongoDB and Redis. Data persists in Docker volumes; `docker compose down -v` wipes it. Settings such as `APP_PORT`, `TOKEN_SECRET` or `RESEND_API_KEY` can go in a `.env` file.
+Builds the React app and starts it with the API, MongoDB and Redis on http://localhost:8080. Data persists in Docker volumes; `docker compose down -v` wipes it. Settings such as `APP_PORT`, `TOKEN_SECRET` or `RESEND_API_KEY` can go in a `.env` file next to `docker-compose.yml`.
 
-### With Node
+### With Node (for development)
 
 ```bash
 npm install
-cp .env.example .env   # then edit as needed
-npm run dev            # or: npm start
+cp server/.env.example server/.env   # then edit as needed
+npm run dev
 ```
 
-Needs a MongoDB instance (`MONGODB_URI`); Redis is optional. Without `RESEND_API_KEY`, password reset emails are written to the log.
+`npm run dev` starts both halves with live reload:
+
+- **React app** on http://localhost:5173 (Vite, hot module reloading). Open this one
+- **API** on http://localhost:8080. Vite forwards `/api` requests to it, so the browser sees a single origin, as in production
+
+The API needs a MongoDB instance (`MONGODB_URI`, default `mongodb://127.0.0.1:27017/sendretrieve`); Redis is optional. Without `RESEND_API_KEY`, password reset emails are written to the log.
+
+### Production build
+
+```bash
+npm run build   # builds the React app into client/dist
+npm start       # Express serves the API and the built app on :8080
+```
+
+### Scripts
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | API and React dev servers together |
+| `npm run dev:server` / `npm run dev:client` | Just one of them |
+| `npm run build` | Production build of the React app |
+| `npm start` | Start the API (serving the built app) |
+| `npm test` | Server and client test suites |
+| `npm run lint` | Lint the client |
 
 ### Tests
 
 ```bash
-npm test               # runs against an in-memory MongoDB, no setup needed
+npm test   # both suites; the server's runs against an in-memory MongoDB, no setup needed
 ```
 
-The Redis tests run when a Redis is available:
+The server's Redis tests run when a Redis is available:
 
 ```bash
 docker run -d --rm -p 6390:6379 redis:8-alpine
-TEST_REDIS_URL=redis://localhost:6390 npm test
+TEST_REDIS_URL=redis://localhost:6390 npm test -w server
 ```
 
 ### Environment variables
+
+Set in `server/.env` (see `server/.env.example`) or the environment.
 
 | Variable | Description |
 | --- | --- |
@@ -99,7 +137,7 @@ TEST_REDIS_URL=redis://localhost:6390 npm test
 | `TRUST_PROXY` | Number of proxies in front of the app (default `1`) |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email delivery for password resets |
 | `LOG_LEVEL`, `LOG_FORMAT` | Optional. Log level (default `info`); `LOG_FORMAT=json` turns off pretty-printing in a terminal |
-| `MAX_FILE_SIZE_MB`, `UPLOAD_DIR`, `PORT` | Optional |
+| `MAX_FILE_SIZE_MB`, `UPLOAD_DIR`, `CLIENT_DIR`, `PORT` | Optional |
 
 ## API
 
@@ -108,6 +146,7 @@ TEST_REDIS_URL=redis://localhost:6390 npm test
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/healthz` | `{ status, mongo, redis, uptimeSeconds }` |
+| `GET` | `/api/config` | Limits and options for the frontend (file size, expiry choices, password rules) |
 
 **Shares**
 
@@ -145,32 +184,47 @@ Errors are JSON: `{ "error": "message", "field"?: "name" }`. An expired session 
 ## Project structure
 
 ```
-server.js              Startup and graceful shutdown: MongoDB, Redis, indexes, cleanup job, HTTP server
-Dockerfile             Production image
-docker-compose.yml     App + MongoDB + Redis for local development
-railway.json           Railway build and health check settings
-src/
-  app.js               Express app (middleware, routers, CSRF check, error handling)
-  config.js            Settings and limits
-  models/              Share, User, RefreshToken
-  routes/              shares.js, auth.js, me.js, health.js
-  lib/
-    auth.js            Sessions: JWT access tokens, rotating refresh tokens, auth middleware
-    shares.js          Share lifecycle: serializing, ending, status
-    schemas.js         Zod request schemas
-    codes.js           Share codes
-    tokens.js          Signed download links
-    storage.js         File storage
-    cleanup.js         Expiry and orphan-file cleanup
-    mailer.js          Email (Resend)
-    logger.js          Pino logger
-    requestLogging.js  Request logs, request IDs, URL redaction
-    redis.js           Redis connection
-    rateLimit.js       Per-IP rate limits (Redis or memory)
-    attempts.js        Per-target brute-force lockouts (Redis or memory)
-    ...                validate, errors, urls
-public/                Frontend: home, login, signup, forgot/reset password, My shares, account
-test/                  API tests
+package.json             npm workspaces + scripts to run both halves
+Dockerfile               One production image: builds the React app, runs the API that serves it
+docker-compose.yml       App + MongoDB + Redis
+railway.json             Railway build and health check settings
+
+client/                  React app (Vite + TypeScript)
+  index.html
+  public/                favicon, theme.js (applies the saved theme before first paint)
+  src/
+    main.tsx             Entry: providers (theme, TanStack Query) and the router
+    routes.tsx           Route table; pages other than home are lazy-loaded
+    pages/               Send, Retrieve, Login, Sign up, Forgot/Reset password, My shares, Account, 404
+    components/          Layout (header, user menu), route guards, file dropzone, shared content
+      ui/                Button, inputs, Field, Card, Alert, Badge, ConfirmDialog, SegmentedControl...
+    hooks/               useSession, useConfig, useTheme
+    lib/                 API client (session refresh), upload with progress, formatting, types
+    test/                Test setup and helpers (fetch mock, app renderer)
+
+server/                  Express API (Node.js + MongoDB)
+  server.js              Startup and graceful shutdown: MongoDB, Redis, indexes, cleanup job, HTTP server
+  src/
+    app.js               Express app: middleware, routers, CSRF check, serving the React build
+    config.js            Settings and limits
+    models/              Share, User, RefreshToken (Mongoose)
+    routes/              shares, auth, me, config, health
+    lib/
+      auth.js            Sessions: JWT access tokens, rotating refresh tokens, auth middleware
+      shares.js          Share lifecycle: serializing, ending, status
+      schemas.js         Zod request schemas
+      codes.js           Share codes
+      tokens.js          Signed download links
+      storage.js         File storage
+      cleanup.js         Expiry and orphan-file cleanup
+      mailer.js          Email (Resend)
+      logger.js          Pino logger
+      requestLogging.js  Request logs, request IDs, URL redaction
+      redis.js           Redis connection
+      rateLimit.js       Per-IP rate limits (Redis or memory)
+      attempts.js        Per-target brute-force lockouts (Redis or memory)
+      ...                validate, errors, urls
+  test/                  API tests
 ```
 
 ## Roadmap
