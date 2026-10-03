@@ -1,5 +1,5 @@
 const { Writable } = require("stream");
-const { app, useTestDatabase } = require("./helpers");
+const { app, createShare, useTestDatabase } = require("./helpers");
 const request = require("supertest");
 const config = require("../src/config");
 const Share = require("../src/models/Share");
@@ -13,11 +13,6 @@ useTestDatabase();
 const MAX_ATTEMPTS = config.lockout.maxFailedAttempts;
 const PASSWORD = "correct-horse";
 
-const createShare = (target, fields) => {
-    const req = request(target).post("/api/shares");
-    for (const [key, value] of Object.entries(fields)) req.field(key, value);
-    return req.expect(201).then((res) => res.body);
-};
 const openShare = (target, code, password) => request(target).post(`/api/shares/${code}/open`).send({ password });
 const login = (target, email, password) => request(target).post("/api/auth/login").send({ email, password });
 const register = (target, email) =>
@@ -91,13 +86,12 @@ describe("logging", () => {
         const { app: logged, lines } = createLoggedApp();
         const agent = request.agent(logged);
         await agent.post("/api/auth/register").send({ name: "Log", email: "log@example.com", password: PASSWORD }).expect(201);
-        const created = await agent
-            .post("/api/shares")
-            .field("text", "top secret message")
-            .field("password", "share-pass")
-            .attach("files", Buffer.from("x"), "private-name.txt")
-            .expect(201);
-        const { code } = created.body;
+        const { code, manageToken, created } = await createShare(
+            agent,
+            { text: "top secret message", password: "share-pass" },
+            [{ name: "private-name.txt", content: "x" }]
+        );
+        const uploadToken = created.body.uploads[0].url.split("/").pop();
         const opened = await openShare(logged, code, "share-pass").expect(200);
         const downloadToken = opened.body.files[0].downloadUrl.split("/").pop();
         await request(logged).get(`/api/files/${downloadToken}`).expect(200);
@@ -106,7 +100,8 @@ describe("logging", () => {
         await request(logged).get("/healthz").expect(200);
 
         const output = JSON.stringify(lines);
-        for (const secret of [code, "top secret message", "share-pass", PASSWORD, "private-name.txt", downloadToken, "reset-secret-123", "sr_at", "sr_rt"]) {
+        const secrets = [code, manageToken, uploadToken, downloadToken, "top secret message", "share-pass", PASSWORD, "private-name.txt", "reset-secret-123", "sr_at", "sr_rt"];
+        for (const secret of secrets) {
             expect(output).not.toContain(secret);
         }
 
@@ -114,6 +109,8 @@ describe("logging", () => {
         expect(requestLines.map((l) => l.req.path)).toEqual([
             "/api/auth/register",
             "/api/shares",
+            "/api/uploads/:token",
+            "/api/shares/:code/complete",
             "/api/shares/:code/open",
             "/api/files/:token",
             "/reset-password",
@@ -125,8 +122,10 @@ describe("logging", () => {
 
         const events = lines.filter((l) => l.event).map((l) => l.event);
         expect(events).toEqual(["auth.registered", "share.created", "share.opened", "file.downloaded"]);
+        // The share counts as created once its upload completes.
+        const completeLine = requestLines[3];
         const createdEvent = lines.find((l) => l.event === "share.created");
-        expect(createdEvent).toMatchObject({ reqId: createLine.reqId, fileCount: 1, passwordProtected: true, owned: true });
+        expect(createdEvent).toMatchObject({ reqId: completeLine.reqId, fileCount: 1, passwordProtected: true, owned: true });
     });
 
     test("unexpected errors are logged with their stack on the request line", async () => {

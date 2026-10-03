@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { app, storedFiles, useTestDatabase } = require("./helpers");
+const { app, storedFiles, createShare, useTestDatabase } = require("./helpers");
 const request = require("supertest");
 const jwt = require("jsonwebtoken");
 const Share = require("../src/models/Share");
@@ -27,13 +27,6 @@ const login = async (email = "ada@example.com", password = PASSWORD) => {
 
 const cookieValue = (res, name) =>
     res.headers["set-cookie"].find((c) => c.startsWith(`${name}=`))?.split(";")[0].split("=")[1];
-
-const createShare = (agent, fields = {}, files = []) => {
-    const req = agent.post("/api/shares");
-    for (const [key, value] of Object.entries(fields)) req.field(key, value);
-    for (const file of files) req.attach("files", Buffer.from(file.content), file.name);
-    return req;
-};
 
 const expiredAccessToken = (userId, sessionVersion = 0) => {
     const key = crypto.createHmac("sha256", "test-secret").update("access-token").digest();
@@ -125,7 +118,7 @@ describe("session refresh", () => {
         const res = await request(app)
             .post("/api/shares")
             .set("Cookie", `sr_at=${expiredAccessToken(user.id)}`)
-            .field("text", "hi")
+            .send({ text: "hi" })
             .expect(401);
         expect(res.body.code).toBe("token_expired");
         expect(await Share.countDocuments()).toBe(0);
@@ -164,15 +157,17 @@ describe("password reset", () => {
     afterEach(() => sendMail.mockRestore());
 
     const requestReset = (email) => request(app).post("/api/auth/forgot-password").send({ email }).expect(200);
-    const tokenFromEmail = () => sendMail.mock.calls.at(-1)[0].text.match(/token=([\w-]+)/)[1];
+    // Sign-up also sends a verification email; these tests look at reset emails only.
+    const resetEmails = () => sendMail.mock.calls.map(([mail]) => mail).filter((mail) => /Reset/.test(mail.subject));
+    const tokenFromEmail = () => resetEmails().at(-1).text.match(/token=([\w-]+)/)[1];
 
     test("same response for known and unknown emails; only real accounts get mail", async () => {
         await register();
         const known = await requestReset("ada@example.com");
         const unknown = await requestReset("nobody@example.com");
         expect(known.body).toEqual(unknown.body);
-        expect(sendMail).toHaveBeenCalledTimes(1);
-        expect(sendMail.mock.calls[0][0].to).toBe("ada@example.com");
+        expect(resetEmails()).toHaveLength(1);
+        expect(resetEmails()[0].to).toBe("ada@example.com");
     });
 
     test("reset sets the new password, logs out other sessions, and works only once", async () => {
@@ -222,7 +217,7 @@ describe("profile", () => {
 
     test("delete account removes the user, their shares and files", async () => {
         const { agent } = await register();
-        await createShare(agent, {}, [{ name: "a.txt", content: "a" }]).expect(201);
+        expect((await createShare(agent, {}, [{ name: "a.txt", content: "a" }])).res.status).toBe(200);
 
         await agent.delete("/api/me").send({ password: "wrong-pass" }).expect(401);
         await agent.delete("/api/me").send({ password: PASSWORD }).expect(204);
@@ -242,14 +237,27 @@ describe("profile", () => {
 describe("my shares", () => {
     test("shares created while logged in are owned; guest shares are not", async () => {
         const { agent } = await register();
-        const owned = await createShare(agent, { text: "mine" }).expect(201);
+        const owned = await createShare(agent, { text: "mine" });
+        expect(owned.res.status).toBe(201);
         expect(owned.body.owned).toBe(true);
-        const guest = await createShare(request(app), { text: "guest" }).expect(201);
+        const guest = await createShare(app, { text: "guest" });
         expect(guest.body.owned).toBe(false);
 
         const res = await agent.get("/api/me/shares").expect(200);
         expect(res.body.shares.map((s) => s.code)).toEqual([owned.body.code]);
         expect(res.body.counts).toEqual({ active: 1, expired: 0, deleted: 0 });
+    });
+
+    test("shares still uploading aren't listed until the upload completes", async () => {
+        const { agent } = await register();
+        const { code, manageToken } = await createShare(agent, {}, [{ name: "a.txt", content: "a" }], { complete: false });
+        const before = await agent.get("/api/me/shares").expect(200);
+        expect(before.body.shares).toHaveLength(0);
+        expect(before.body.counts.active).toBe(0);
+        await agent.get(`/api/me/shares/${code}`).expect(404);
+
+        await agent.post(`/api/shares/${code}/complete`).send({ manageToken }).expect(200);
+        expect((await agent.get("/api/me/shares").expect(200)).body.shares.map((s) => s.code)).toEqual([code]);
     });
 
     test("list shows views and download counts", async () => {
@@ -306,7 +314,7 @@ describe("my shares", () => {
     test("expired owned shares keep their metadata but lose their content", async () => {
         const { agent } = await register();
         const { body } = await createShare(agent, { text: "old" }, [{ name: "a.txt", content: "a" }]);
-        await createShare(request(app), { text: "guest" });
+        await createShare(app, { text: "guest" });
         await Share.updateMany({}, { expiresAt: new Date(Date.now() - 1000) });
 
         expect(await deleteExpiredShares()).toBe(2);
