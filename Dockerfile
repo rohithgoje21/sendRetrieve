@@ -32,10 +32,12 @@ COPY --from=server-deps /app/node_modules ./node_modules
 COPY --from=server-deps /app/server/node_modules ./server/node_modules
 COPY server/package.json server/server.js ./server/
 COPY server/src ./server/src
+# Admin tools, e.g. docker compose exec app node scripts/set-role.js <email> admin
+COPY server/scripts ./server/scripts
 COPY --from=client /app/client/dist ./client/dist
 
-# Uploaded files live here until object storage arrives; mount a volume to
-# keep them across container restarts.
+# Only used with STORAGE_DRIVER=disk; with object storage, files never touch
+# this container.
 RUN mkdir -p /app/uploads && chown node:node /app/uploads
 USER node
 

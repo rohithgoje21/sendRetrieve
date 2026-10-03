@@ -1,6 +1,11 @@
-# Runs the whole stack locally:  docker compose up --build
-# App on http://localhost:8080 (change with APP_PORT). Values below can be
-# overridden from a .env file next to this one.
+# The whole stack locally:   docker compose up --build
+#
+#   App            http://localhost:8080   (APP_PORT)
+#   MinIO (S3 API) http://localhost:9000   (MINIO_PORT)  browsers upload here directly
+#   MinIO console  http://localhost:9001   (MINIO_CONSOLE_PORT)
+#
+# Values below can be overridden from a .env file next to this one. The MinIO
+# credentials are for local use only.
 
 name: sendretrieve
 
@@ -19,12 +24,21 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    volumes:
-      - uploads:/app/uploads
+      # Files live in MinIO. The app reaches it as minio:9000 inside Docker;
+      # browsers reach it as localhost:9000, so signed URLs use that address.
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      S3_BUCKET: sendretrieve
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-sendretrieve}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-sendretrieve-dev-secret}
+      S3_CREATE_BUCKET: "true"
     depends_on:
       mongo:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     restart: unless-stopped
 
@@ -49,6 +63,20 @@ services:
       retries: 12
     restart: unless-stopped
 
+  # S3-compatible object storage, built from source (see docker/minio/Dockerfile).
+  minio:
+    build: ./docker/minio
+    image: sendretrieve-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-sendretrieve}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-sendretrieve-dev-secret}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
 volumes:
   mongo-data:
-  uploads:
+  minio-data:

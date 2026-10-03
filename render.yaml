@@ -1,0 +1,84 @@
+# Render Blueprint: the API (this repo's Dockerfile) and a Redis-compatible
+# Key Value instance. MongoDB (e.g. MongoDB Atlas) and S3-compatible object
+# storage (Cloudflare R2, MinIO, AWS S3) are connected through environment
+# variables; values marked `sync: false` are entered in the Render dashboard.
+# See "Deploying" in README.md.
+
+services:
+  - type: web
+    name: sendretrieve-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TOKEN_SECRET
+        generateValue: true
+      # Requests arrive through Vercel's proxy and then Render's.
+      - key: TRUST_PROXY
+        value: "2"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: sendretrieve-redis
+          property: connectionString
+      - key: MONGODB_URI
+        sync: false
+      # The frontend's URL, e.g. https://sendretrieve.vercel.app (emailed links,
+      # share links, and the origin allowed to connect for live updates).
+      - key: APP_URL
+        sync: false
+      # Optional extra frontend origins, comma-separated (e.g. preview deployments).
+      - key: CORS_ORIGINS
+        sync: false
+      - key: STORAGE_DRIVER
+        value: s3
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+  - type: keyvalue
+    name: sendretrieve-redis
+    plan: free
+    # Rate limits and lockouts must not be evicted under memory pressure.
+    maxmemoryPolicy: noeviction
+    # Reachable only from Render services, not the internet.
+    ipAllowList: []
+
+  # Optional: self-host MinIO on Render instead of using R2 or S3. It must be a
+  # public web service, because browsers upload to it directly, and it needs
+  # a persistent disk (a paid plan). Then set S3_ENDPOINT on the API to this
+  # service's URL and S3_FORCE_PATH_STYLE stays true.
+  #
+  # - type: web
+  #   name: sendretrieve-minio
+  #   runtime: docker
+  #   dockerfilePath: ./docker/minio/Dockerfile
+  #   dockerContext: ./docker/minio
+  #   dockerCommand: minio server /data --address :9000
+  #   plan: starter
+  #   disk:
+  #     name: data
+  #     mountPath: /data
+  #     sizeGB: 10
+  #   envVars:
+  #     - key: PORT
+  #       value: "9000"
+  #     - key: MINIO_ROOT_USER
+  #       sync: false
+  #     - key: MINIO_ROOT_PASSWORD
+  #       sync: false
