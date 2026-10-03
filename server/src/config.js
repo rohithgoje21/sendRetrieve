@@ -136,7 +136,32 @@ const config = {
     // file's contents rather than its name.
     blockExecutables: process.env.BLOCK_EXECUTABLES !== "false",
 
-    cleanupIntervalMs: 5 * 60 * 1000,
+    // How often the scheduler looks for expired shares, abandoned uploads and
+    // orphaned files (only one worker instance does it per interval).
+    cleanupIntervalMs: 60 * 1000,
+
+    queue: {
+        // RabbitMQ. Without it, an in-process queue with the same retry and
+        // dead-letter behavior is used (fine for one server and for tests).
+        url: process.env.AMQP_URL || null,
+        // Wait before each retry of a failed job; after the last, the message
+        // goes to the queue's dead-letter queue.
+        retryDelaysMs: process.env.QUEUE_RETRY_DELAYS_MS
+            ? process.env.QUEUE_RETRY_DELAYS_MS.split(",").map(Number)
+            : [1000, 5000, 30000],
+        prefetch: 10,
+        // Run the background workers inside the API process. Default: yes
+        // without RabbitMQ; with RabbitMQ, run them separately (npm run worker).
+        inlineWorkers: process.env.RUN_WORKERS ? process.env.RUN_WORKERS === "true" : !process.env.AMQP_URL,
+    },
+
+    // Calls to outside services (email, virus scanner) fail fast after this
+    // many consecutive failures, then try again after the cool-down.
+    circuitBreaker: {
+        failureThreshold: 5,
+        resetTimeoutMs: 30 * 1000,
+        callTimeoutMs: 10 * 1000,
+    },
 
     // Optional. Without it, rate limits and lockouts are kept in memory (lost
     // on restart and not shared between instances).

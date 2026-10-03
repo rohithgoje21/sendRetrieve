@@ -6,7 +6,8 @@ const { initRealtime, closeRealtime } = require("./src/modules/realtime/realtime
 const { logger } = require("./src/infrastructure/logger");
 const { connectRedis } = require("./src/infrastructure/redis");
 const { storage } = require("./src/infrastructure/storage");
-const { startCleanupJob } = require("./src/workers/cleanup");
+const { initBus, getBus } = require("./src/infrastructure/queue");
+const { startWorkers } = require("./src/workers");
 const Share = require("./src/modules/shares/share.model");
 const User = require("./src/modules/users/user.model");
 const RefreshToken = require("./src/modules/auth/refreshToken.model");
@@ -43,7 +44,12 @@ const start = async () => {
     const redis = config.redisUrl ? await connectRedis(config.redisUrl) : null;
     if (!redis) logger.info("REDIS_URL not set: rate limits, lockouts and codes are kept in memory");
 
-    const cleanupTimer = startCleanupJob(config.cleanupIntervalMs);
+    // Events: RabbitMQ if configured, otherwise in-process. Without RabbitMQ
+    // (or with RUN_WORKERS=true) this process also runs the workers.
+    await initBus();
+    const workers = config.queue.inlineWorkers ? await startWorkers({ redis }) : null;
+    if (!workers) logger.info("Workers run in a separate process (npm run worker)");
+
     const app = createApp({ redis });
     // One HTTP server for both the API and Socket.IO (which handles /socket.io).
     const server = http.createServer(app);
@@ -61,7 +67,7 @@ const start = async () => {
         shuttingDown = true;
         app.locals.shuttingDown = true; // /healthz starts returning 503
         logger.info({ event: "server.stopping", signal }, "Shutting down");
-        clearInterval(cleanupTimer);
+        workers?.stop();
 
         const forceExit = setTimeout(() => {
             logger.warn("Requests still running after timeout; forcing shutdown");
@@ -75,6 +81,7 @@ const start = async () => {
             const closed = closeRealtime();
             server.closeIdleConnections();
             await closed;
+            await getBus().close();
             await mongoose.disconnect();
             if (redis) await redis.close();
             logger.info({ event: "server.stopped" }, "Shutdown complete");

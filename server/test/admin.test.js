@@ -2,7 +2,7 @@ const path = require("path");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const mongoose = require("mongoose");
-const { app, storedFiles, createShare, PNG, useTestDatabase } = require("./helpers");
+const { app, storedFiles, createShare, PNG, settle, useTestDatabase } = require("./helpers");
 const request = require("supertest");
 const User = require("../src/modules/users/user.model");
 const Share = require("../src/modules/shares/share.model");
@@ -135,6 +135,7 @@ describe("share moderation", () => {
 
         await admin.delete(`/api/admin/shares/${code}`).expect(204);
         await request(app).post(`/api/shares/${code}/open`).expect(404);
+        await settle();
         expect(storedFiles()).toHaveLength(0);
 
         const deleted = (await owner.get("/api/me/shares?status=deleted").expect(200)).body.shares;
@@ -148,6 +149,7 @@ describe("share moderation", () => {
         const pending = await createShare(app, {}, [{ name: "p.txt", content: "p" }], { complete: false });
         await admin.delete(`/api/admin/shares/${guest.code}`).expect(204);
         await admin.delete(`/api/admin/shares/${pending.code}`).expect(204);
+        await settle();
         expect(await Share.countDocuments()).toBe(0);
         expect(storedFiles()).toHaveLength(0);
         await admin.get("/api/admin/shares/ABCD2345").expect(404);

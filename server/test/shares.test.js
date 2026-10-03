@@ -1,9 +1,9 @@
 const fs = require("fs");
 const path = require("path");
-const { app, uploadDir, storedFiles, createShare, PNG, useTestDatabase } = require("./helpers");
+const { app, uploadDir, storedFiles, createShare, PNG, settle, useTestDatabase } = require("./helpers");
 const request = require("supertest");
 const Share = require("../src/modules/shares/share.model");
-const { deleteExpiredShares, deleteOrphanFiles } = require("../src/workers/cleanup");
+const { deleteExpiredShares, deleteOrphanFiles } = require("../src/workers/scheduler");
 
 useTestDatabase();
 
@@ -136,6 +136,8 @@ describe("uploading files", () => {
         const { code, manageToken } = await share({}, [{ name: "a.txt", content: "a" }], { complete: false });
         expect(storedFiles()).toHaveLength(1);
         await request(app).post(`/api/shares/${code}/cancel`).send({ manageToken }).expect(204);
+        expect(await Share.countDocuments()).toBe(0);
+        await settle(); // the cleanup worker deletes the files
         expect(storedFiles()).toHaveLength(0);
         expect(await Share.countDocuments()).toBe(0);
     });
@@ -184,6 +186,7 @@ describe("file contents decide the file type", () => {
         ]);
         expect(res.status).toBe(422);
         expect(res.body.error).toMatch(/"invoice.pdf" is a program/);
+        await settle();
         expect(storedFiles()).toHaveLength(0);
         await openShare(code).expect(404);
         expect(await Share.countDocuments()).toBe(0);
@@ -331,8 +334,13 @@ describe("cleanup", () => {
         await Share.updateOne({ code }, { expiresAt: new Date(Date.now() - 1000) });
 
         expect(await deleteExpiredShares()).toBe(1);
-        expect(await Share.countDocuments()).toBe(1);
+        // Ended at once: no longer openable.
+        await openShare(code).expect(404);
+
+        // The cleanup worker deletes the files, then the guest share's record.
+        await settle();
         expect(storedFiles()).toHaveLength(0);
+        expect(await Share.countDocuments()).toBe(1);
     });
 
     test("discards uploads that were never completed", async () => {
@@ -341,6 +349,7 @@ describe("cleanup", () => {
 
         expect(await deleteExpiredShares()).toBe(1);
         expect(await Share.countDocuments()).toBe(0);
+        await settle();
         expect(storedFiles()).toHaveLength(0);
     });
 

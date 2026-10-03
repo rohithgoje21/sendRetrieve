@@ -1,5 +1,6 @@
 const express = require("express");
 const mongoose = require("mongoose");
+const { getBus } = require("../../infrastructure/queue");
 
 const CHECK_TIMEOUT_MS = 2000;
 
@@ -16,7 +17,8 @@ const check = (promise) => {
 // GET /healthz for Docker, Railway and uptime monitors.
 //   200 ok        everything is up
 //   200 degraded  Redis is down (the app still works; limits fail open) or
-//                 object storage is down (text shares still work)
+//                 object storage is down (text shares still work) or the
+//                 queue is down (background jobs wait; sweeps catch up)
 //   503           MongoDB is down, or the server is shutting down
 const createHealthRouter = (ctx) => {
     const router = express.Router();
@@ -24,16 +26,17 @@ const createHealthRouter = (ctx) => {
     router.get("/healthz", async (req, res) => {
         const mongo =
             mongoose.connection.readyState === 1 ? await check(mongoose.connection.db.admin().ping()) : "down";
-        const [redis, storage] = await Promise.all([
+        const [redis, storage, queue] = await Promise.all([
             ctx.redis ? check(ctx.redis.ping()) : "disabled",
             ctx.storage.health(),
+            getBus().health(),
         ]);
         const shuttingDown = Boolean(req.app.locals.shuttingDown);
 
         let status = "ok";
         if (shuttingDown) status = "shutting_down";
         else if (mongo === "down") status = "down";
-        else if (redis === "down" || storage === "down") status = "degraded";
+        else if (redis === "down" || storage === "down" || queue === "down") status = "degraded";
 
         res.set("Cache-Control", "no-store");
         res.status(status === "ok" || status === "degraded" ? 200 : 503).json({
@@ -41,6 +44,7 @@ const createHealthRouter = (ctx) => {
             mongo,
             redis,
             storage,
+            queue,
             uptimeSeconds: Math.round(process.uptime()),
         });
     });

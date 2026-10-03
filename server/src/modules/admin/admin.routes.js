@@ -10,6 +10,8 @@ const { baseUrl } = require("../../shared/urls");
 const { requireAuth, requireRole } = require("../auth/middleware");
 const { revokeAllSessions } = require("../auth/sessions");
 const { liveFilter, serializeOwnedShare, shareStatus, endShares, discardShares } = require("../shares/shares.service");
+const { getBus, isQueue } = require("../../infrastructure/queue");
+const { emailBreaker } = require("../../infrastructure/mailer");
 
 const PAGE_SIZE = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -151,6 +153,44 @@ const createAdminRouter = () => {
 
         req.log.info({ event: "admin.share_removed", shareId: share._id }, "Admin removed a share");
         res.status(204).end();
+    });
+
+    /* ---------- Background jobs ---------- */
+
+    // Queue depths, consumers and dead-lettered messages, plus the state of
+    // the circuit breakers in front of outside services.
+    router.get("/queues", async (req, res) => {
+        const bus = getBus();
+        res.set("Cache-Control", "no-store");
+        res.json({ broker: bus.kind, queues: await bus.stats(), circuitBreakers: [emailBreaker.snapshot()] });
+    });
+
+    const queueParam = (req) => {
+        if (!isQueue(req.params.queue)) throw new HttpError(404, "Unknown queue");
+        return req.params.queue;
+    };
+
+    // Messages that failed every retry, with their last error.
+    router.get("/queues/:queue/dead-letters", async (req, res) => {
+        const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
+        res.set("Cache-Control", "no-store");
+        res.json({ messages: await getBus().peekDeadLetters(queueParam(req), limit) });
+    });
+
+    // After fixing the cause (e.g. the email provider is back), send the
+    // dead-lettered messages through again.
+    router.post("/queues/:queue/dead-letters/replay", async (req, res) => {
+        const queue = queueParam(req);
+        const replayed = await getBus().replayDeadLetters(queue);
+        req.log.info({ event: "admin.dead_letters_replayed", queue, replayed }, "Dead letters replayed");
+        res.json({ replayed });
+    });
+
+    router.delete("/queues/:queue/dead-letters", async (req, res) => {
+        const queue = queueParam(req);
+        const purged = await getBus().purgeDeadLetters(queue);
+        req.log.warn({ event: "admin.dead_letters_purged", queue, purged }, "Dead letters purged");
+        res.json({ purged });
     });
 
     return router;

@@ -30,7 +30,7 @@ WORKDIR /app
 
 COPY --from=server-deps /app/node_modules ./node_modules
 COPY --from=server-deps /app/server/node_modules ./server/node_modules
-COPY server/package.json server/server.js ./server/
+COPY server/package.json server/server.js server/worker.js ./server/
 COPY server/src ./server/src
 # Admin tools, e.g. docker compose exec app node scripts/set-role.js <email> admin
 COPY server/scripts ./server/scripts

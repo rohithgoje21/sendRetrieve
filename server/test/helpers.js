@@ -6,6 +6,8 @@ const path = require("path");
 
 process.env.UPLOAD_DIR = process.env.UPLOAD_DIR || fs.mkdtempSync(path.join(os.tmpdir(), "sendretrieve-test-"));
 process.env.TOKEN_SECRET = "test-secret";
+// Quick retries, so tests of failing jobs don't wait 36 seconds.
+process.env.QUEUE_RETRY_DELAYS_MS = process.env.QUEUE_RETRY_DELAYS_MS || "10,20,30";
 
 // A stand-in for the React build (client/dist), so the server tests don't
 // depend on the frontend having been built.
@@ -20,8 +22,14 @@ const mongoose = require("mongoose");
 const request = require("supertest");
 const { MongoMemoryServer } = require("mongodb-memory-server");
 const { createApp } = require("../src/app");
+const { startWorkers } = require("../src/workers");
+const { getBus } = require("../src/infrastructure/queue");
 
 const uploadDir = process.env.UPLOAD_DIR;
+
+// Background jobs (file cleanup, emails...) run in this process on the
+// in-memory queue. settle() waits until every queued job has finished.
+const settle = () => getBus().whenIdle();
 const app = createApp({ rateLimit: false });
 
 // Every stored file, as storage keys ("shares/<shareId>/<fileId>").
@@ -87,9 +95,12 @@ const useTestDatabase = () => {
         mongo = await MongoMemoryServer.create();
         await mongoose.connect(mongo.getUri());
         await Promise.all(Object.values(mongoose.models).map((m) => m.syncIndexes()));
+        // Workers without the scheduler: tests run the sweeps themselves.
+        await startWorkers({ scheduler: false });
     });
 
     afterEach(async () => {
+        await settle();
         await Promise.all(Object.values(mongoose.models).map((m) => m.deleteMany({})));
         for (const entry of fs.readdirSync(uploadDir)) fs.rmSync(path.join(uploadDir, entry), { recursive: true, force: true });
     });
@@ -101,4 +112,4 @@ const useTestDatabase = () => {
     });
 };
 
-module.exports = { app, uploadDir, storedFiles, createShare, uploadTo, typeFor, PNG, useTestDatabase };
+module.exports = { app, uploadDir, storedFiles, createShare, uploadTo, typeFor, PNG, settle, useTestDatabase };

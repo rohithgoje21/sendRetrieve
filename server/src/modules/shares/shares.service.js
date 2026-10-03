@@ -1,7 +1,7 @@
 const config = require("../../config");
 const Share = require("./share.model");
 const { createDownloadToken } = require("../files/linkTokens");
-const { storage } = require("../../infrastructure/storage");
+const { publish } = require("../../infrastructure/queue");
 const { notifyShare } = require("../realtime/realtime");
 
 // Only types a browser renders as media are ever served inline, and only when
@@ -73,47 +73,62 @@ const serializeOwnedShare = (share, baseUrl, { includeContent = false } = {}) =>
     return result;
 };
 
-// Ends shares: deletes their files and content. Guest shares are removed
-// entirely; owned shares keep their metadata for the owner's history.
+// Guest shares have no history; their record goes once the files are deleted.
+// This is only a backstop in case that never happens.
+const GUEST_RECORD_BACKSTOP_MS = 24 * 60 * 60 * 1000;
+
+const endedReasonFor = (share, reason) => reason ?? (share.viewsRemaining === 0 ? "used_up" : "expired");
+
+// Ends shares. The share stops working at once (its message is erased and it
+// is marked ended); its files move to "pending_deletion" and a share.ended
+// event asks the cleanup worker to delete them from storage. Owned shares
+// keep their metadata for the owner's history; guest shares are removed once
+// their files are gone.
 // `reason` defaults to "used_up"/"expired" based on each share's state.
 const endShares = async (shares, reason) => {
     if (shares.length === 0) return;
-    await storage.delete(fileKeys(shares));
+    const now = new Date();
+    const ownedPurgeAt = new Date(now.getTime() + config.endedShareRetentionSeconds * 1000);
+    const guestPurgeAt = new Date(now.getTime() + GUEST_RECORD_BACKSTOP_MS);
 
-    const guestIds = shares.filter((s) => !s.ownerId).map((s) => s._id);
-    if (guestIds.length) await Share.deleteMany({ _id: { $in: guestIds } });
-
-    const owned = shares.filter((s) => s.ownerId);
-    if (owned.length) {
-        const now = new Date();
-        const purgeAt = new Date(now.getTime() + config.endedShareRetentionSeconds * 1000);
-        await Share.bulkWrite(
-            owned.map((s) => ({
-                updateOne: {
-                    filter: { _id: s._id, endedAt: null },
-                    update: {
-                        $set: {
-                            endedAt: now,
-                            endedReason: reason ?? (s.viewsRemaining === 0 ? "used_up" : "expired"),
-                            text: null,
-                            purgeAt,
-                        },
+    const result = await Share.bulkWrite(
+        shares.map((s) => ({
+            updateOne: {
+                filter: { _id: s._id, endedAt: null },
+                update: {
+                    $set: {
+                        endedAt: now,
+                        endedReason: endedReasonFor(s, reason),
+                        text: null,
+                        filesState: s.files.length ? "pending_deletion" : "deleted",
+                        purgeAt: s.ownerId ? ownedPurgeAt : guestPurgeAt,
                     },
                 },
-            }))
-        );
-    }
+            },
+        }))
+    );
+    if (result.modifiedCount === 0) return;
 
     for (const share of shares) {
-        notifyShare(share, "share:ended", { reason: reason ?? (share.viewsRemaining === 0 ? "used_up" : "expired") });
+        const ended = { reason: endedReasonFor(share, reason) };
+        await publish("share.ended", {
+            shareId: String(share._id),
+            code: share.code,
+            ownerId: share.ownerId ? String(share.ownerId) : null,
+            reason: ended.reason,
+            keys: share.files.map((f) => f.storedName),
+        });
+        notifyShare(share, "share:ended", ended);
     }
 };
 
-// Throws away shares whose upload never finished: files and record, no history.
+// Throws away shares whose upload never finished (or was refused): the
+// record goes now, the cleanup worker deletes whatever was uploaded.
 const discardShares = async (shares) => {
     if (shares.length === 0) return;
-    await storage.delete(fileKeys(shares));
     await Share.deleteMany({ _id: { $in: shares.map((s) => s._id) } });
+    const keys = fileKeys(shares);
+    if (keys.length) await publish("share.discarded", { shareIds: shares.map((s) => String(s._id)), keys });
 };
 
 module.exports = {

@@ -1,45 +1,73 @@
 # The whole stack locally:   docker compose up --build
 #
-#   App            http://localhost:8080   (APP_PORT)
-#   MinIO (S3 API) http://localhost:9000   (MINIO_PORT)  browsers upload here directly
-#   MinIO console  http://localhost:9001   (MINIO_CONSOLE_PORT)
+#   App               http://localhost:8080    (APP_PORT)
+#   MinIO (S3 API)    http://localhost:9000    (MINIO_PORT)  browsers upload here directly
+#   MinIO console     http://localhost:9001    (MINIO_CONSOLE_PORT)
+#   RabbitMQ console  http://localhost:15672   (RABBITMQ_CONSOLE_PORT)
 #
-# Values below can be overridden from a .env file next to this one. The MinIO
-# credentials are for local use only.
+# Values below can be overridden from a .env file next to this one. All
+# credentials here are for local use only.
 
 name: sendretrieve
 
+# Settings shared by the API and the worker (same image, different command).
+x-app-environment: &app-environment
+  MONGODB_URI: mongodb://mongo:27017/sendretrieve
+  REDIS_URL: redis://redis:6379
+  AMQP_URL: amqp://${RABBITMQ_USER:-sendretrieve}:${RABBITMQ_PASSWORD:-sendretrieve-dev-secret}@rabbitmq:5672
+  TOKEN_SECRET: ${TOKEN_SECRET:-local-dev-secret-change-me}
+  APP_URL: ${APP_URL:-http://localhost:8080}
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  EMAIL_FROM: ${EMAIL_FROM:-}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  # Files live in MinIO. The app reaches it as minio:9000 inside Docker;
+  # browsers reach it as localhost:9000, so signed URLs use that address.
+  STORAGE_DRIVER: s3
+  S3_ENDPOINT: http://minio:9000
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+  S3_BUCKET: sendretrieve
+  S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-sendretrieve}
+  S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-sendretrieve-dev-secret}
+  S3_CREATE_BUCKET: "true"
+
+x-depends-on-infrastructure: &depends-on-infrastructure
+  mongo:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  minio:
+    condition: service_healthy
+  rabbitmq:
+    condition: service_healthy
+
 services:
+  # The API (and the React app it serves).
   app:
     build: .
+    image: sendretrieve-app
     ports:
       - "${APP_PORT:-8080}:8080"
     environment:
+      <<: *app-environment
       PORT: 8080
-      MONGODB_URI: mongodb://mongo:27017/sendretrieve
-      REDIS_URL: redis://redis:6379
-      TOKEN_SECRET: ${TOKEN_SECRET:-local-dev-secret-change-me}
-      APP_URL: ${APP_URL:-http://localhost:8080}
       TRUST_PROXY: 0
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      EMAIL_FROM: ${EMAIL_FROM:-}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      # Files live in MinIO. The app reaches it as minio:9000 inside Docker;
-      # browsers reach it as localhost:9000, so signed URLs use that address.
-      STORAGE_DRIVER: s3
-      S3_ENDPOINT: http://minio:9000
-      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
-      S3_BUCKET: sendretrieve
-      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-sendretrieve}
-      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-sendretrieve-dev-secret}
-      S3_CREATE_BUCKET: "true"
+    depends_on: *depends-on-infrastructure
+    restart: unless-stopped
+
+  # Background jobs: file cleanup, emails, scheduled sweeps. Scale it with
+  # `docker compose up --scale worker=3`: queues spread the jobs, and a Redis
+  # lock keeps each sweep to one instance.
+  worker:
+    image: sendretrieve-app
+    command: ["node", "worker.js"]
+    environment: *app-environment
     depends_on:
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+      <<: *depends-on-infrastructure
+      app:
+        condition: service_started
+    # The image's health check probes the API's HTTP port; the worker has none.
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   mongo:
@@ -63,6 +91,23 @@ services:
       retries: 12
     restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-sendretrieve}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-sendretrieve-dev-secret}
+    ports:
+      - "${RABBITMQ_CONSOLE_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+
   # S3-compatible object storage, built from source (see docker/minio/Dockerfile).
   minio:
     build: ./docker/minio
@@ -80,3 +125,4 @@ services:
 volumes:
   mongo-data:
   minio-data:
+  rabbitmq-data:

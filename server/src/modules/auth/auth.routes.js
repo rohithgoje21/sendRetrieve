@@ -3,7 +3,7 @@ const bcrypt = require("bcryptjs");
 const config = require("../../config");
 const User = require("../users/user.model");
 const schemas = require("./auth.schemas");
-const mailer = require("../../infrastructure/mailer");
+const { requestEmail } = require("../notifications/emails");
 const { HttpError } = require("../../shared/errors");
 const { validateBody } = require("../../shared/validate");
 const { limiter } = require("../../shared/rateLimit");
@@ -21,10 +21,11 @@ const {
 
 const VERIFY_EMAIL = "verify-email";
 
-// Emails a fresh verification code. Throws 429 during the resend cooldown.
+// Emails a fresh verification code (through the queue). Throws 429 during
+// the resend cooldown.
 const sendVerificationCode = async (ctx, user) => {
     const { code, expiresInSeconds, resendAfterSeconds } = await ctx.otp.issue(VERIFY_EMAIL, user._id);
-    await mailer.sendVerificationEmail(user, code, expiresInSeconds);
+    await requestEmail("verify-email", user.email, { name: user.name, code, minutes: Math.round(expiresInSeconds / 60) });
     return { resendAfterSeconds };
 };
 
@@ -178,8 +179,10 @@ const createAuthRouter = (ctx) => {
                 const link = `${baseUrl(req)}/reset-password?token=${token}`;
                 // Same response either way, so this endpoint can't be used to
                 // check whether an email has an account.
-                await mailer.sendPasswordResetEmail(user, link).catch((err) => {
-                    req.log.error({ err, event: "email.failed", userId: user._id }, "Failed to send password reset email");
+                await requestEmail("password-reset", user.email, {
+                    name: user.name,
+                    link,
+                    minutes: Math.round(config.auth.passwordResetTtlSeconds / 60),
                 });
             }
             res.json({ message: FORGOT_PASSWORD_MESSAGE });

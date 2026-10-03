@@ -8,7 +8,7 @@ const schemas = require("./users.schemas");
 const { HttpError } = require("../../shared/errors");
 const { validateBody } = require("../../shared/validate");
 const { limiter } = require("../../shared/rateLimit");
-const { storage } = require("../../infrastructure/storage");
+const { publish } = require("../../infrastructure/queue");
 const { requireAuth } = require("../auth/middleware");
 const { issueSession, clearSession, revokeAllSessions } = require("../auth/sessions");
 
@@ -60,9 +60,11 @@ const createUsersRouter = (ctx) => {
         async (req, res) => {
             await verifyPassword(req, req.body.password, { field: "password", message: "Incorrect password" });
 
-            const shares = await Share.find({ ownerId: req.user._id }, { files: 1 }).lean();
-            await storage.delete(shares.flatMap((s) => s.files.map((f) => f.storedName)));
+            // Live shares stop working at once; the cleanup worker deletes their files.
+            const shares = await Share.find({ ownerId: req.user._id }, { files: 1, filesState: 1 }).lean();
             await Share.deleteMany({ ownerId: req.user._id });
+            const keys = shares.filter((s) => s.filesState !== "deleted").flatMap((s) => s.files.map((f) => f.storedName));
+            if (keys.length) await publish("share.discarded", { shareIds: shares.map((s) => String(s._id)), keys });
             await RefreshToken.deleteMany({ userId: req.user._id });
             await User.deleteOne({ _id: req.user._id });
             req.log.info({ event: "account.deleted", sharesDeleted: shares.length }, "Account deleted");

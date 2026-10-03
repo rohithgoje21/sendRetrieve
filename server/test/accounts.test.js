@@ -1,12 +1,12 @@
 const crypto = require("crypto");
-const { app, storedFiles, createShare, useTestDatabase } = require("./helpers");
+const { app, storedFiles, createShare, settle, useTestDatabase } = require("./helpers");
 const request = require("supertest");
 const jwt = require("jsonwebtoken");
 const Share = require("../src/modules/shares/share.model");
 const User = require("../src/modules/users/user.model");
 const RefreshToken = require("../src/modules/auth/refreshToken.model");
 const mailer = require("../src/infrastructure/mailer");
-const { deleteExpiredShares } = require("../src/workers/cleanup");
+const { deleteExpiredShares } = require("../src/workers/scheduler");
 
 useTestDatabase();
 
@@ -156,7 +156,12 @@ describe("password reset", () => {
     });
     afterEach(() => sendMail.mockRestore());
 
-    const requestReset = (email) => request(app).post("/api/auth/forgot-password").send({ email }).expect(200);
+    // Emails go out through the queue; wait for the worker to send them.
+    const requestReset = async (email) => {
+        const res = await request(app).post("/api/auth/forgot-password").send({ email }).expect(200);
+        await settle();
+        return res;
+    };
     // Sign-up also sends a verification email; these tests look at reset emails only.
     const resetEmails = () => sendMail.mock.calls.map(([mail]) => mail).filter((mail) => /Reset/.test(mail.subject));
     const tokenFromEmail = () => resetEmails().at(-1).text.match(/token=([\w-]+)/)[1];
@@ -224,6 +229,7 @@ describe("profile", () => {
 
         expect(await User.countDocuments()).toBe(0);
         expect(await Share.countDocuments()).toBe(0);
+        await settle();
         expect(storedFiles()).toHaveLength(0);
         await agent.get("/api/auth/me").expect(401);
     });
@@ -300,6 +306,7 @@ describe("my shares", () => {
 
         await agent.delete(`/api/me/shares/${body.code}`).expect(204);
         await request(app).post(`/api/shares/${body.code}/open`).expect(404);
+        await settle();
         expect(storedFiles()).toHaveLength(0);
 
         const deleted = await agent.get("/api/me/shares?status=deleted").expect(200);
@@ -318,6 +325,7 @@ describe("my shares", () => {
         await Share.updateMany({}, { expiresAt: new Date(Date.now() - 1000) });
 
         expect(await deleteExpiredShares()).toBe(2);
+        await settle();
         expect(await Share.countDocuments()).toBe(1); // the guest share is gone
         expect(storedFiles()).toHaveLength(0);
 
@@ -326,6 +334,7 @@ describe("my shares", () => {
         const stored = await Share.findOne().lean();
         expect(stored.text).toBeNull();
         expect(stored.purgeAt).toBeTruthy();
+        expect(stored.filesState).toBe("deleted"); // lifecycle: stored -> pending_deletion -> deleted
     });
 
     test("used-up shares are labelled as such", async () => {

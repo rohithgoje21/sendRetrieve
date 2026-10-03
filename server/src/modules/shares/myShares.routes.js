@@ -3,7 +3,6 @@ const config = require("../../config");
 const Share = require("./share.model");
 const { HttpError } = require("../../shared/errors");
 const { normalizeCode } = require("./codes");
-const { storage } = require("../../infrastructure/storage");
 const { baseUrl } = require("../../shared/urls");
 const { requireAuth } = require("../auth/middleware");
 const { serializeOwnedShare, shareStatus, endShares } = require("./shares.service");
@@ -83,7 +82,7 @@ const createMySharesRouter = () => {
         if (wasActive) {
             await endShares([share], "deleted");
         } else {
-            await storage.delete(share.files.map((f) => f.storedName));
+            // Its files are already deleted, or about to be by the cleanup worker.
             await Share.deleteOne({ _id: share._id });
         }
         req.log.info(

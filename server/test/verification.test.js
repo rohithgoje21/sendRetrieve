@@ -1,4 +1,4 @@
-const { app, useTestDatabase } = require("./helpers");
+const { app, settle, useTestDatabase } = require("./helpers");
 const request = require("supertest");
 const User = require("../src/modules/users/user.model");
 const mailer = require("../src/infrastructure/mailer");
@@ -14,6 +14,7 @@ afterEach(() => {
     jest.restoreAllMocks();
 });
 
+// Emails go out through the queue: wait for the worker before reading them.
 const codeEmails = () => sendMail.mock.calls.map(([mail]) => mail).filter((mail) => /verification code/.test(mail.subject));
 const lastCode = () => codeEmails().at(-1).text.match(/code is: (\d{6})/)[1];
 
@@ -22,6 +23,7 @@ const register = async () => {
     const agent = request.agent(app);
     const email = `verify-${++counter}@example.com`;
     const res = await agent.post("/api/auth/register").send({ name: "Vera", email, password: "correct-horse" }).expect(201);
+    await settle();
     return { agent, user: res.body.user, email };
 };
 
@@ -81,6 +83,7 @@ test("a new code can be requested after a minute; it replaces the old one", asyn
 
     advance(61);
     const sent = await agent.post("/api/auth/verify-email/send").expect(200);
+    await settle();
     expect(sent.body).toMatchObject({ resendAfterSeconds: 60 });
     const second = lastCode();
     if (second !== first) await verify(agent, first).expect(400);

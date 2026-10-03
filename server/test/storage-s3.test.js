@@ -19,11 +19,11 @@ if (TEST_S3_ENDPOINT) {
     });
 }
 
-const { app, createShare, PNG, useTestDatabase } = require("./helpers");
+const { app, createShare, PNG, settle, useTestDatabase } = require("./helpers");
 const request = require("supertest");
 const Share = require("../src/modules/shares/share.model");
 const { storage } = require("../src/infrastructure/storage");
-const { deleteExpiredShares, deleteOrphanFiles } = require("../src/workers/cleanup");
+const { deleteExpiredShares, deleteOrphanFiles } = require("../src/workers/scheduler");
 
 const bucketKeys = async () => {
     const keys = [];
@@ -90,6 +90,7 @@ const bucketKeys = async () => {
         const exe = Buffer.concat([Buffer.from("MZ"), Buffer.alloc(100)]);
         const { res } = await createShare(app, {}, [{ name: "setup.pdf", content: exe, type: "application/pdf" }]);
         expect(res.status).toBe(422);
+        await settle();
         expect(await bucketKeys()).toEqual([]);
     });
 
@@ -100,6 +101,7 @@ const bucketKeys = async () => {
         const expired = await createShare(app, {}, [{ name: "b.txt", content: "b" }]);
         await Share.updateOne({ code: expired.code }, { expiresAt: new Date(Date.now() - 1000) });
         await deleteExpiredShares();
+        await settle();
         expect(await bucketKeys()).toEqual([]);
 
         // An object nothing references (e.g. uploaded after its share was discarded)
