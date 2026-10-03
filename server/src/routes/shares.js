@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const contentDisposition = require("content-disposition");
 const config = require("../config");
@@ -6,15 +7,18 @@ const Share = require("../models/Share");
 const schemas = require("../lib/schemas");
 const { generateCode, normalizeCode } = require("../lib/codes");
 const { verifyDownloadToken } = require("../lib/tokens");
-const { upload, filePath, deleteFiles } = require("../lib/storage");
+const { storage, storageKey } = require("../lib/storage");
+const { HEAD_BYTES, resolveFileType } = require("../lib/fileType");
 const { HttpError } = require("../lib/errors");
-const { parse, validateBody } = require("../lib/validate");
+const { validateBody } = require("../lib/validate");
 const { limiter } = require("../lib/rateLimit");
-const { optionalAuth } = require("../lib/auth");
+const { optionalAuth, hashToken, randomToken, manageTokenMatches } = require("../lib/auth");
 const { baseUrl } = require("../lib/urls");
-const { PREVIEWABLE_TYPES, liveFilter, serializeFile } = require("../lib/shares");
+const { PREVIEWABLE_TYPES, liveFilter, serializeFile, discardShares } = require("../lib/shares");
+const { notifyShare } = require("../realtime");
 
 const NOT_FOUND_MESSAGE = "Share not found. It may have expired or reached its view limit.";
+const UPLOAD_NOT_FOUND_MESSAGE = "This upload has expired or was already completed.";
 
 // Guest shares have no history to keep, so they get a purge date right away
 // as a backstop for the cleanup job.
@@ -23,6 +27,10 @@ const GUEST_PURGE_DELAY_MS = 60 * 60 * 1000;
 // Strip control characters and path separators; keep the name readable.
 const cleanFileName = (name) =>
     name.replace(/[\u0000-\u001f\u007f/\\]/g, "_").trim().slice(0, 255) || "file";
+
+// A declared type is only a hint (the real one is detected after upload), but
+// it's signed into the upload URL, so keep it to something header-safe.
+const cleanContentType = (type) => (/^[\w.+-]+\/[\w.+-]+$/.test(type) ? type.toLowerCase() : "application/octet-stream");
 
 const insertWithUniqueCode = async (doc) => {
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -35,12 +43,86 @@ const insertWithUniqueCode = async (doc) => {
     throw new Error("Could not generate a unique share code");
 };
 
+const shareSummary = (req, share) => ({
+    code: share.code,
+    url: `${baseUrl(req)}/s/${share.code}`,
+    expiresAt: share.expiresAt,
+    maxViews: share.maxViews,
+    passwordProtected: Boolean(share.passwordHash),
+    fileCount: share.files.length,
+    owned: Boolean(share.ownerId),
+});
+
+const logCreated = (req, share) =>
+    req.log.info(
+        {
+            event: "share.created",
+            shareId: share._id,
+            owned: Boolean(share.ownerId),
+            fileCount: share.files.length,
+            totalBytes: share.files.reduce((sum, f) => sum + f.size, 0),
+            hasText: Boolean(share.text),
+            durationSeconds: share.durationSeconds,
+            maxViews: share.maxViews,
+            passwordProtected: Boolean(share.passwordHash),
+        },
+        "Share created"
+    );
+
+// A share whose upload is still in progress, if `manageToken` is its token.
+const findPendingShare = async (code, manageToken) => {
+    const normalized = normalizeCode(code);
+    const share =
+        normalized &&
+        (await Share.findOne({ code: normalized, uploadPending: true, endedAt: null, expiresAt: { $gt: new Date() } }));
+    if (!share || !manageTokenMatches(share, manageToken)) throw new HttpError(404, UPLOAD_NOT_FOUND_MESSAGE);
+    return share;
+};
+
+// Checks each uploaded file against what was announced and detects its real
+// type. Returns the files' new types, or throws (discarding the share if a
+// file is an executable).
+const verifyUploadedFiles = async (share) => {
+    const checked = await Promise.all(
+        share.files.map(async (file) => {
+            const stat = await storage.stat(file.storedName);
+            if (!stat) {
+                throw new HttpError(409, `"${file.originalName}" hasn't finished uploading.`, { fileId: file._id });
+            }
+            if (stat.size !== file.size) {
+                throw new HttpError(409, `"${file.originalName}" didn't upload correctly. Try again.`, { fileId: file._id });
+            }
+            const head = await storage.readStart(file.storedName, HEAD_BYTES);
+            return {
+                file,
+                ...resolveFileType({
+                    declared: file.mimeType,
+                    head,
+                    previewable: PREVIEWABLE_TYPES,
+                    blockExecutables: config.blockExecutables,
+                }),
+            };
+        })
+    );
+
+    const blocked = checked.find((c) => c.blocked);
+    if (blocked) {
+        await discardShares([share]);
+        throw new HttpError(
+            422,
+            `"${blocked.file.originalName}" is a program (executable). Executable files can't be shared.`,
+            { fileId: blocked.file._id }
+        );
+    }
+    return checked.map(({ file, mimeType }) => ({ ...file.toObject(), mimeType }));
+};
+
 // Counts one view. Returns the share's state after the view, or null if a
 // concurrent request used up the last one first.
 const consumeView = async (share) => {
     if (share.viewsRemaining === null) {
-        await Share.updateOne({ _id: share._id }, { $inc: { views: 1 } });
-        return { viewsRemaining: null, expiresAt: share.expiresAt };
+        const updated = await Share.findOneAndUpdate({ _id: share._id }, { $inc: { views: 1 } }, { new: true });
+        return { viewsRemaining: null, views: updated.views, expiresAt: share.expiresAt };
     }
 
     const updated = await Share.findOneAndUpdate(
@@ -59,70 +141,120 @@ const consumeView = async (share) => {
             await Share.updateOne({ _id: share._id }, { expiresAt });
         }
     }
-    return { viewsRemaining: updated.viewsRemaining, expiresAt };
+    return { viewsRemaining: updated.viewsRemaining, views: updated.views, expiresAt };
 };
 
 const createSharesRouter = (ctx) => {
     const router = express.Router();
 
+    // Step 1: create the share. Without files it's ready at once. With files,
+    // the response includes a signed upload URL per file; the browser uploads
+    // straight to storage, then calls /complete.
     router.post(
         "/shares",
         limiter(ctx, { name: "create-share", limit: 30, error: "Too many shares created. Please wait a few minutes." }),
         optionalAuth,
-        upload.array("files", config.limits.maxFiles),
+        validateBody(schemas.createShare),
         async (req, res) => {
-            const uploaded = req.files || [];
-            try {
-                const { text, expiresIn, maxViews, password } = parse(schemas.createShare, req.body);
-                if (!text && uploaded.length === 0) {
-                    throw new HttpError(400, "Add some text or at least one file");
-                }
+            const { text, expiresIn, maxViews, password, files } = req.body;
+            if (!text && files.length === 0) throw new HttpError(400, "Add some text or at least one file");
 
-                const expiresAt = new Date(Date.now() + config.expiryOptions[expiresIn] * 1000);
-                const share = await insertWithUniqueCode({
-                    ownerId: req.user?._id ?? null,
-                    text,
-                    files: uploaded.map((f) => ({
-                        originalName: cleanFileName(f.originalname),
-                        storedName: f.filename,
-                        size: f.size,
-                        mimeType: f.mimetype || "application/octet-stream",
-                    })),
-                    passwordHash: password ? await bcrypt.hash(password, config.bcryptRounds) : null,
-                    maxViews,
-                    viewsRemaining: maxViews,
-                    expiresAt,
-                    purgeAt: req.user ? null : new Date(expiresAt.getTime() + GUEST_PURGE_DELAY_MS),
-                });
+            const shareId = new mongoose.Types.ObjectId();
+            const fileDocs = files.map((f) => {
+                const fileId = new mongoose.Types.ObjectId();
+                return {
+                    _id: fileId,
+                    originalName: cleanFileName(f.name),
+                    storedName: storageKey(shareId, fileId),
+                    size: f.size,
+                    mimeType: cleanContentType(f.type),
+                };
+            });
 
-                req.log.info(
-                    {
-                        event: "share.created",
-                        shareId: share._id,
-                        owned: Boolean(req.user),
-                        fileCount: share.files.length,
-                        totalBytes: share.files.reduce((sum, f) => sum + f.size, 0),
-                        hasText: Boolean(text),
-                        expiresIn,
-                        maxViews,
-                        passwordProtected: Boolean(password),
-                    },
-                    "Share created"
-                );
+            const durationSeconds = config.expiryOptions[expiresIn];
+            const pending = fileDocs.length > 0;
+            // While uploading, expiresAt is the upload deadline; the chosen
+            // expiry starts once the upload completes.
+            const expiresAt = new Date(Date.now() + (pending ? config.uploadWindowSeconds : durationSeconds) * 1000);
+            const manageToken = randomToken();
 
-                res.status(201).json({
-                    code: share.code,
-                    url: `${baseUrl(req)}/s/${share.code}`,
-                    expiresAt: share.expiresAt,
-                    maxViews,
-                    passwordProtected: Boolean(password),
-                    fileCount: share.files.length,
-                    owned: Boolean(req.user),
-                });
-            } catch (err) {
-                await deleteFiles(uploaded.map((f) => f.filename)).catch(() => {});
-                throw err;
+            const share = await insertWithUniqueCode({
+                _id: shareId,
+                ownerId: req.user?._id ?? null,
+                text,
+                files: fileDocs,
+                passwordHash: password ? await bcrypt.hash(password, config.bcryptRounds) : null,
+                maxViews,
+                viewsRemaining: maxViews,
+                expiresAt,
+                durationSeconds,
+                uploadPending: pending,
+                manageTokenHash: hashToken(manageToken),
+                purgeAt: req.user ? null : new Date(expiresAt.getTime() + GUEST_PURGE_DELAY_MS),
+            });
+
+            const uploads = await Promise.all(
+                share.files.map(async (f) => ({
+                    fileId: f._id,
+                    ...(await storage.createUploadTarget({ key: f.storedName, size: f.size, contentType: f.mimeType })),
+                }))
+            );
+
+            if (!pending) {
+                logCreated(req, share);
+                notifyShare(share, "share:created");
             }
+            res.status(201).json({
+                ...shareSummary(req, share),
+                status: pending ? "uploading" : "ready",
+                manageToken,
+                uploads,
+                uploadExpiresAt: pending ? share.expiresAt : null,
+            });
+        }
+    );
+
+    // Step 3: the browser has uploaded every file. Check them and open the
+    // share for business.
+    router.post(
+        "/shares/:code/complete",
+        limiter(ctx, { name: "complete-share", limit: 60, error: "Too many requests. Please wait a few minutes." }),
+        validateBody(schemas.manageShare),
+        async (req, res) => {
+            const share = await findPendingShare(req.params.code, req.body.manageToken);
+            const files = await verifyUploadedFiles(share);
+
+            const expiresAt = new Date(Date.now() + share.durationSeconds * 1000);
+            const completed = await Share.findOneAndUpdate(
+                { _id: share._id, uploadPending: true },
+                {
+                    $set: {
+                        uploadPending: false,
+                        files,
+                        expiresAt,
+                        purgeAt: share.ownerId ? null : new Date(expiresAt.getTime() + GUEST_PURGE_DELAY_MS),
+                    },
+                },
+                { new: true }
+            );
+            if (!completed) throw new HttpError(404, UPLOAD_NOT_FOUND_MESSAGE);
+
+            logCreated(req, completed);
+            notifyShare(completed, "share:created");
+            res.json({ ...shareSummary(req, completed), status: "ready" });
+        }
+    );
+
+    // The sender gave up (or the upload failed): delete what was uploaded.
+    router.post(
+        "/shares/:code/cancel",
+        limiter(ctx, { name: "cancel-share", limit: 60, error: "Too many requests. Please wait a few minutes." }),
+        validateBody(schemas.manageShare),
+        async (req, res) => {
+            const share = await findPendingShare(req.params.code, req.body.manageToken);
+            await discardShares([share]);
+            req.log.info({ event: "share.upload_cancelled", shareId: share._id }, "Upload cancelled");
+            res.status(204).end();
         }
     );
 
@@ -164,6 +296,11 @@ const createSharesRouter = (ctx) => {
                 { event: "share.opened", shareId: share._id, viewsRemaining: state.viewsRemaining },
                 "Share opened"
             );
+            notifyShare(share, "share:opened", {
+                views: state.views,
+                maxViews: share.maxViews,
+                viewsRemaining: state.viewsRemaining,
+            });
 
             res.set("Cache-Control", "no-store");
             res.json({
@@ -193,21 +330,23 @@ const createSharesRouter = (ctx) => {
 
             const inline = req.query.inline === "1" && PREVIEWABLE_TYPES.has(file.mimeType);
             if (!inline) {
-                await Share.updateOne(
+                const updated = await Share.findOneAndUpdate(
                     { _id: share._id, "files._id": file._id },
-                    { $inc: { "files.$.downloads": 1 } }
+                    { $inc: { "files.$.downloads": 1 } },
+                    { new: true, projection: { files: 1 } }
                 );
                 req.log.info({ event: "file.downloaded", shareId: share._id, fileId: file._id }, "File downloaded");
+                notifyShare(share, "file:downloaded", {
+                    fileId: file._id,
+                    fileName: file.originalName,
+                    downloads: updated?.files.id(file._id)?.downloads ?? file.downloads + 1,
+                });
             }
 
-            res.sendFile(filePath(file.storedName), {
-                headers: {
-                    "Content-Type": inline ? file.mimeType : "application/octet-stream",
-                    "Content-Disposition": contentDisposition(file.originalName, {
-                        type: inline ? "inline" : "attachment",
-                    }),
-                    "Cache-Control": "private, no-store",
-                },
+            await storage.sendDownload(res, {
+                key: file.storedName,
+                contentType: inline ? file.mimeType : "application/octet-stream",
+                contentDisposition: contentDisposition(file.originalName, { type: inline ? "inline" : "attachment" }),
             });
         }
     );

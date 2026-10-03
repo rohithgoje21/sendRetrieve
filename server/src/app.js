@@ -9,6 +9,11 @@ const { createAuthRouter } = require("./routes/auth");
 const { createMeRouter } = require("./routes/me");
 const { createHealthRouter } = require("./routes/health");
 const { createConfigRouter } = require("./routes/config");
+const { createAdminRouter } = require("./routes/admin");
+const { createUploadsRouter } = require("./routes/uploads");
+const { storage } = require("./lib/storage");
+const { createKeyValueStore } = require("./lib/kv");
+const { createOtpService } = require("./lib/otp");
 const { createRequestLogger } = require("./lib/requestLogging");
 const { createAttemptTracker } = require("./lib/attempts");
 const { HttpError, errorHandler } = require("./lib/errors");
@@ -50,7 +55,7 @@ const sameOriginOnly = (req, res, next) => {
     if (SAFE_METHODS.has(req.method) || !origin) return next();
 
     const allowed = new Set([req.get("host"), req.get("x-forwarded-host")]);
-    if (config.appUrl) allowed.add(new URL(config.appUrl).host);
+    for (const url of [config.appUrl, ...config.corsOrigins].filter(Boolean)) allowed.add(new URL(url).host);
 
     let originHost = null;
     try {
@@ -64,25 +69,54 @@ const sameOriginOnly = (req, res, next) => {
 
 // Options:
 //   rateLimit  per-IP rate limits on/off (tests turn them off)
-//   redis      connected node-redis client, or null for in-memory limits
+//   redis      connected node-redis client, or null for in-memory limits and codes
 //   logger     pino logger for request logs (tests pass one to capture output)
 const createApp = ({ rateLimit = true, redis = null, logger } = {}) => {
     const app = express();
-    const ctx = { rateLimit, redis, attempts: createAttemptTracker(redis) };
+    const ctx = {
+        rateLimit,
+        redis,
+        storage,
+        attempts: createAttemptTracker(redis),
+        otp: createOtpService(createKeyValueStore(redis)),
+    };
+    // Files are fetched from (and uploaded to) object storage directly, so the
+    // page must be allowed to load media from and send requests to it.
+    const storageOrigins = storage.publicOrigin ? [storage.publicOrigin] : [];
+    // Helmet asks browsers to upgrade http:// requests to https://. Good in
+    // production, but it would also rewrite redirects to a local MinIO at
+    // http://localhost:9000, which has no HTTPS, so it's left out then.
+    const httpStorage = storageOrigins.some((origin) => origin.startsWith("http:"));
 
     app.set("trust proxy", config.trustProxy);
     app.disable("x-powered-by");
 
     // First, so every request has an ID and a logger.
     app.use(createRequestLogger(logger));
-    app.use(helmet());
+    app.use(
+        helmet({
+            contentSecurityPolicy: {
+                directives: {
+                    "img-src": ["'self'", "data:", ...storageOrigins],
+                    "media-src": ["'self'", ...storageOrigins],
+                    "connect-src": ["'self'", ...storageOrigins],
+                    "upgrade-insecure-requests": httpStorage ? null : [],
+                },
+            },
+        })
+    );
     app.use(createHealthRouter(ctx));
     app.use(cookieParser());
-    app.use(express.json({ limit: "10kb" }));
 
     app.use("/api", sameOriginOnly);
+    // Raw file bodies (disk storage only); before the JSON parser on purpose.
+    if (storage.receiveUpload) app.use("/api/uploads", createUploadsRouter(ctx, storage));
+    // Room for a share's message (up to 100,000 characters) plus file details.
+    app.use(express.json({ limit: "512kb" }));
+
     app.use("/api/auth", createAuthRouter(ctx));
     app.use("/api/me", createMeRouter(ctx));
+    app.use("/api/admin", createAdminRouter(ctx));
     app.use("/api", createConfigRouter());
     app.use("/api", createSharesRouter(ctx));
     app.use("/api", () => {

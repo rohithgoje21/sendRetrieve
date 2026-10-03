@@ -5,16 +5,18 @@ const { logger: defaultLogger } = require("./logger");
 // URLs carry secrets: share codes, download tokens, reset tokens (?token=).
 // Log the route's shape instead of the value, and drop query strings.
 const SECRET_ROUTES = [
-    [/^\/api\/shares\/[^/]+\/open$/, "/api/shares/:code/open"],
+    [/^\/api\/shares\/[^/]+\/(open|complete|cancel)$/, "/api/shares/:code/$1"],
     [/^\/api\/files\/[^/]+$/, "/api/files/:token"],
+    [/^\/api\/uploads\/[^/]+$/, "/api/uploads/:token"],
     [/^\/api\/me\/shares\/[^/]+$/, "/api/me/shares/:code"],
+    [/^\/api\/admin\/shares\/[^/]+$/, "/api/admin/shares/:code"],
     [/^\/s\/[^/]+$/, "/s/:code"],
 ];
 
 const redactPath = (url = "") => {
     const path = url.split("?")[0];
     for (const [pattern, replacement] of SECRET_ROUTES) {
-        if (pattern.test(path)) return replacement;
+        if (pattern.test(path)) return path.replace(pattern, replacement);
     }
     return path;
 };

@@ -1,32 +1,37 @@
 const Share = require("../models/Share");
-const { deleteFiles, listStoredFiles } = require("./storage");
-const { endShares } = require("./shares");
+const { storage } = require("./storage");
+const { endShares, discardShares } = require("./shares");
 const log = require("./logger").logger.child({ component: "cleanup" });
 
-// Files younger than this may belong to an upload that hasn't been saved to
-// the database yet, so the orphan sweep leaves them alone.
+// Files younger than this may belong to an upload that hasn't been recorded
+// yet, so the orphan sweep leaves them alone.
 const ORPHAN_MIN_AGE_MS = 60 * 60 * 1000;
 
-// Ends shares whose time is up: files and content are deleted; guest shares
-// disappear entirely, owned shares stay in the owner's history.
+// Shares whose time is up:
+//   - uploads never completed: discarded (files and record)
+//   - everything else: ended; files and content deleted, guest shares removed,
+//     owned shares kept (without content) in the owner's history
 const deleteExpiredShares = async () => {
     const expired = await Share.find(
         { endedAt: null, expiresAt: { $lte: new Date() } },
-        { files: 1, ownerId: 1, viewsRemaining: 1 }
+        { code: 1, files: 1, ownerId: 1, viewsRemaining: 1, uploadPending: 1 }
     ).lean();
-    await endShares(expired);
+    await discardShares(expired.filter((s) => s.uploadPending));
+    await endShares(expired.filter((s) => !s.uploadPending));
     return expired.length;
 };
 
-// Removes files on disk that no live share references (e.g. left behind by
-// the TTL backstop or a crashed upload).
-const deleteOrphanFiles = async () => {
+// Removes stored files that no live share (or upload in progress) references,
+// e.g. left behind by the database's TTL backstop or an upload to a share that
+// was already discarded. Files younger than `minAgeMs` are left alone.
+const deleteOrphanFiles = async ({ minAgeMs = ORPHAN_MIN_AGE_MS } = {}) => {
     const referenced = new Set(await Share.distinct("files.storedName", { endedAt: null }));
-    const cutoff = Date.now() - ORPHAN_MIN_AGE_MS;
-    const orphans = (await listStoredFiles())
-        .filter((f) => !referenced.has(f.name) && f.modifiedAt.getTime() < cutoff)
-        .map((f) => f.name);
-    await deleteFiles(orphans);
+    const cutoff = Date.now() - minAgeMs;
+    const orphans = [];
+    for await (const { key, modifiedAt } of storage.list()) {
+        if (!referenced.has(key) && modifiedAt.getTime() < cutoff) orphans.push(key);
+    }
+    await storage.delete(orphans);
     return orphans.length;
 };
 

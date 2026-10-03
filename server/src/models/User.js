@@ -1,12 +1,19 @@
 const mongoose = require("mongoose");
 
+const ROLES = ["user", "admin"];
+
 const userSchema = new mongoose.Schema(
     {
         email: { type: String, required: true, unique: true, lowercase: true, trim: true },
         name: { type: String, required: true, trim: true },
         passwordHash: { type: String, required: true },
-        // Embedded in access tokens; bumping it (on password change/reset)
-        // invalidates every access token issued before.
+        role: { type: String, enum: ROLES, default: "user" },
+        // Set once the user proves they own the address (one-time code by email).
+        emailVerifiedAt: { type: Date, default: null },
+        // Disabled accounts can't log in; their sessions are revoked.
+        disabledAt: { type: Date, default: null },
+        // Embedded in access tokens; bumping it (on password change/reset or
+        // when disabling) invalidates every access token issued before.
         sessionVersion: { type: Number, default: 0 },
         passwordResetTokenHash: { type: String, default: null },
         passwordResetExpiresAt: { type: Date, default: null },
@@ -15,7 +22,15 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.methods.toPublic = function () {
-    return { id: this._id, email: this.email, name: this.name, createdAt: this.createdAt };
+    return {
+        id: this._id,
+        email: this.email,
+        name: this.name,
+        role: this.role ?? "user",
+        emailVerified: Boolean(this.emailVerifiedAt),
+        createdAt: this.createdAt,
+    };
 };
 
 module.exports = mongoose.model("User", userSchema);
+module.exports.ROLES = ROLES;

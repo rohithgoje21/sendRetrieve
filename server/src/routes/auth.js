@@ -17,7 +17,17 @@ const {
     revokeSession,
     revokeAllSessions,
     requireAuth,
+    createRealtimeToken,
 } = require("../lib/auth");
+
+const VERIFY_EMAIL = "verify-email";
+
+// Emails a fresh verification code. Throws 429 during the resend cooldown.
+const sendVerificationCode = async (ctx, user) => {
+    const { code, expiresInSeconds, resendAfterSeconds } = await ctx.otp.issue(VERIFY_EMAIL, user._id);
+    await mailer.sendVerificationEmail(user, code, expiresInSeconds);
+    return { resendAfterSeconds };
+};
 
 // Compared against when the email doesn't exist, so a login for an unknown
 // account takes as long as one with a wrong password.
@@ -47,6 +57,11 @@ const createAuthRouter = (ctx) => {
                 throw err;
             }
             req.log.info({ event: "auth.registered", userId: user._id }, "Account created");
+            // Best effort: the account works without it, and the user can ask
+            // for another code.
+            await sendVerificationCode(ctx, user).catch((err) =>
+                req.log.error({ err, event: "email.failed", userId: user._id }, "Failed to send verification code")
+            );
             await issueSession(req, res, user);
             res.status(201).json({ user: user.toPublic() });
         }
@@ -73,6 +88,13 @@ const createAuthRouter = (ctx) => {
             }
 
             await ctx.attempts.reset("login", email);
+            // Only after the password check, so it doesn't reveal disabled accounts.
+            if (user.disabledAt) {
+                req.log.warn({ event: "auth.login_disabled", userId: user._id }, "Login to a disabled account");
+                throw new HttpError(403, "This account has been disabled. Contact the site's administrator.", {
+                    code: "account_disabled",
+                });
+            }
             req.log.info({ event: "auth.login", userId: user._id }, "Logged in");
             await issueSession(req, res, user);
             res.json({ user: user.toPublic() });
@@ -101,6 +123,45 @@ const createAuthRouter = (ctx) => {
     router.get("/me", requireAuth, (req, res) => {
         res.json({ user: req.user.toPublic() });
     });
+
+    // A short-lived token for the Socket.IO connection, which may go to a
+    // different origin where the session cookies aren't sent.
+    router.get("/realtime-token", requireAuth, (req, res) => {
+        res.set("Cache-Control", "no-store");
+        res.json({ token: createRealtimeToken(req.user), expiresInSeconds: config.realtime.tokenTtlSeconds });
+    });
+
+    router.post(
+        "/verify-email/send",
+        requireAuth,
+        limiter(ctx, { name: "verify-email-send", limit: 10, windowMinutes: 60, error: "Too many codes requested. Please try again later." }),
+        async (req, res) => {
+            if (req.user.emailVerifiedAt) throw new HttpError(400, "Your email is already verified");
+            const { resendAfterSeconds } = await sendVerificationCode(ctx, req.user);
+            req.log.info({ event: "auth.verification_sent" }, "Verification code sent");
+            res.json({ message: `We sent a code to ${req.user.email}.`, resendAfterSeconds });
+        }
+    );
+
+    router.post(
+        "/verify-email",
+        requireAuth,
+        limiter(ctx, { name: "verify-email", limit: 30, error: "Too many attempts. Please wait a few minutes." }),
+        validateBody(schemas.verifyEmail),
+        async (req, res) => {
+            if (req.user.emailVerifiedAt) return res.json({ user: req.user.toPublic() });
+            try {
+                await ctx.otp.verify(VERIFY_EMAIL, req.user._id, req.body.code);
+            } catch (err) {
+                req.log.warn({ event: "auth.verification_failed" }, "Wrong or expired verification code");
+                throw err;
+            }
+            req.user.emailVerifiedAt = new Date();
+            await req.user.save();
+            req.log.info({ event: "auth.email_verified" }, "Email verified");
+            res.json({ user: req.user.toPublic() });
+        }
+    );
 
     router.post(
         "/forgot-password",

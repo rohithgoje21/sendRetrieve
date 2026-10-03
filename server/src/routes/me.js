@@ -9,7 +9,7 @@ const { HttpError } = require("../lib/errors");
 const { validateBody } = require("../lib/validate");
 const { limiter } = require("../lib/rateLimit");
 const { normalizeCode } = require("../lib/codes");
-const { deleteFiles } = require("../lib/storage");
+const { storage } = require("../lib/storage");
 const { baseUrl } = require("../lib/urls");
 const { requireAuth, issueSession, clearSession, revokeAllSessions } = require("../lib/auth");
 const { serializeOwnedShare, shareStatus, endShares } = require("../lib/shares");
@@ -17,18 +17,21 @@ const { serializeOwnedShare, shareStatus, endShares } = require("../lib/shares")
 const PAGE_SIZE = 20;
 const STATUSES = ["active", "expired", "deleted"];
 
+// Shares still uploading aren't listed: they appear once the upload completes
+// (or are cleaned up if it never does).
 const statusFilter = (ownerId, status) => {
     const now = new Date();
+    const base = { ownerId, uploadPending: { $ne: true } };
     switch (status) {
         case "active":
-            return { ownerId, endedAt: null, expiresAt: { $gt: now } };
+            return { ...base, endedAt: null, expiresAt: { $gt: now } };
         case "expired":
             return {
-                ownerId,
+                ...base,
                 $or: [{ endedReason: { $in: ["expired", "used_up"] } }, { endedAt: null, expiresAt: { $lte: now } }],
             };
         case "deleted":
-            return { ownerId, endedReason: "deleted" };
+            return { ...base, endedReason: { $in: ["deleted", "removed"] } };
     }
 };
 
@@ -82,7 +85,7 @@ const createMeRouter = (ctx) => {
             await verifyPassword(req, req.body.password, { field: "password", message: "Incorrect password" });
 
             const shares = await Share.find({ ownerId: req.user._id }, { files: 1 }).lean();
-            await deleteFiles(shares.flatMap((s) => s.files.map((f) => f.storedName)));
+            await storage.delete(shares.flatMap((s) => s.files.map((f) => f.storedName)));
             await Share.deleteMany({ ownerId: req.user._id });
             await RefreshToken.deleteMany({ userId: req.user._id });
             await User.deleteOne({ _id: req.user._id });
@@ -120,7 +123,7 @@ const createMeRouter = (ctx) => {
 
     const findOwnedShare = async (req) => {
         const code = normalizeCode(req.params.code);
-        const share = code && (await Share.findOne({ code, ownerId: req.user._id }));
+        const share = code && (await Share.findOne({ code, ownerId: req.user._id, uploadPending: { $ne: true } }));
         // 404 rather than 403 for other people's shares: don't confirm they exist.
         if (!share) throw new HttpError(404, "Share not found");
         return share;
@@ -144,7 +147,7 @@ const createMeRouter = (ctx) => {
         if (wasActive) {
             await endShares([share], "deleted");
         } else {
-            await deleteFiles(share.files.map((f) => f.storedName));
+            await storage.delete(share.files.map((f) => f.storedName));
             await Share.deleteOne({ _id: share._id });
         }
         req.log.info(

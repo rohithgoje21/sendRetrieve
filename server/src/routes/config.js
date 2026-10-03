@@ -30,6 +30,8 @@ const createConfigRouter = () => {
             downloadWindowSeconds: config.downloadWindowSeconds,
             sharePassword: { min: limits.minPasswordLength, max: limits.maxPasswordLength },
             accountPassword: { min: auth.minPasswordLength, max: auth.maxPasswordLength },
+            uploadWindowSeconds: config.uploadWindowSeconds,
+            storage: config.storage.driver,
         });
     });
 

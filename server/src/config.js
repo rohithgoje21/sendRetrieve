@@ -9,12 +9,45 @@ require("dotenv").config({
 });
 
 const HOUR = 60 * 60;
+const MB = 1024 * 1024;
+
+const list = (value) =>
+    value
+        ? value
+              .split(",")
+              .map((v) => v.trim().replace(/\/+$/, ""))
+              .filter(Boolean)
+        : [];
+
+// Where uploaded files live: "s3" (MinIO, Cloudflare R2, AWS S3, any
+// S3-compatible service) or "disk" (a local folder, for tests and quick runs).
+const storageDriver = process.env.STORAGE_DRIVER || (process.env.S3_BUCKET ? "s3" : "disk");
 
 const config = {
     env: process.env.NODE_ENV || "development",
     port: Number(process.env.PORT) || 8080,
     mongoUri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/sendretrieve",
+    // Disk storage only.
     uploadDir: process.env.UPLOAD_DIR || path.join(__dirname, "..", "uploads"),
+
+    storage: {
+        driver: storageDriver,
+        s3: {
+            // Omit for AWS S3. MinIO: http://localhost:9000 (http://minio:9000 inside Docker).
+            endpoint: process.env.S3_ENDPOINT || null,
+            // The address browsers use for signed upload/download links, when it
+            // differs from the one the server uses (e.g. a Docker service name).
+            publicEndpoint: process.env.S3_PUBLIC_ENDPOINT || process.env.S3_ENDPOINT || null,
+            region: process.env.S3_REGION || "us-east-1",
+            bucket: process.env.S3_BUCKET || "sendretrieve",
+            accessKeyId: process.env.S3_ACCESS_KEY_ID || null,
+            secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || null,
+            // MinIO and most self-hosted services need path-style URLs (host/bucket/key).
+            forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== "false",
+            // Create the bucket at startup if it's missing (handy for local MinIO).
+            createBucket: process.env.S3_CREATE_BUCKET === "true",
+        },
+    },
     // The built React app (npm run build), served by Express in production.
     clientDir: process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "client", "dist"),
 
@@ -26,6 +59,11 @@ const config = {
     // Falls back to the request's host, which is fine locally but should be set
     // in production so a forged Host header can't redirect reset links.
     appUrl: process.env.APP_URL ? process.env.APP_URL.replace(/\/+$/, "") : null,
+
+    // Other origins allowed to talk to this server: the frontend's URL when it
+    // is hosted separately (e.g. https://sendretrieve.vercel.app). Used for the
+    // real-time connection's CORS and the same-origin check on API requests.
+    corsOrigins: list(process.env.CORS_ORIGINS),
 
     email: {
         resendApiKey: process.env.RESEND_API_KEY || null,
@@ -41,6 +79,19 @@ const config = {
         maxNameLength: 60,
     },
 
+    // Email verification codes.
+    otp: {
+        length: 6,
+        ttlSeconds: 10 * 60,
+        maxAttempts: 5,
+        resendCooldownSeconds: 60,
+    },
+
+    realtime: {
+        // Short-lived token a signed-in browser exchanges for its socket connection.
+        tokenTtlSeconds: 2 * 60,
+    },
+
     // Lower in tests so the suite isn't dominated by hashing time.
     bcryptRounds: process.env.NODE_ENV === "test" ? 4 : 12,
 
@@ -53,7 +104,9 @@ const config = {
     trustProxy: process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1,
 
     limits: {
-        maxFileSize: Number(process.env.MAX_FILE_SIZE_MB || 50) * 1024 * 1024,
+        // With S3, files go straight from the browser to storage, so it can take
+        // much larger files than disk storage, which streams through the server.
+        maxFileSize: Number(process.env.MAX_FILE_SIZE_MB || (storageDriver === "s3" ? 500 : 50)) * MB,
         maxFiles: 10,
         maxTextLength: 100_000,
         minPasswordLength: 4,
@@ -74,6 +127,14 @@ const config = {
     // How long a download link from an "open" stays valid. This is also the
     // grace period a share survives after its last allowed view.
     downloadWindowSeconds: 10 * 60,
+
+    // How long a browser has to upload a new share's files before the share is
+    // abandoned and cleaned up.
+    uploadWindowSeconds: 60 * 60,
+
+    // Refuse executables (Windows, Linux, macOS binaries), detected from the
+    // file's contents rather than its name.
+    blockExecutables: process.env.BLOCK_EXECUTABLES !== "false",
 
     cleanupIntervalMs: 5 * 60 * 1000,
 

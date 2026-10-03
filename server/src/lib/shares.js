@@ -1,19 +1,23 @@
 const config = require("../config");
 const Share = require("../models/Share");
 const { createDownloadToken } = require("./tokens");
-const { deleteFiles } = require("./storage");
+const { storage } = require("./storage");
+const { notifyShare } = require("../realtime");
 
-// Only types a browser renders as media are ever served inline. Everything
-// else (HTML, SVG, PDF, ...) is forced to download so an uploaded file can't
-// run script on this origin.
+// Only types a browser renders as media are ever served inline, and only when
+// the file's contents confirmed the type (see fileType.js). Everything else
+// (HTML, SVG, PDF, ...) is forced to download so an uploaded file can't run
+// script in the page.
 const PREVIEWABLE_TYPES = new Set([
     "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
     "video/mp4", "video/webm", "video/ogg",
     "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav", "audio/webm", "audio/mp4", "audio/aac",
 ]);
 
-// Conditions for a share that can still be opened or downloaded from.
-const liveFilter = () => ({ endedAt: null, expiresAt: { $gt: new Date() } });
+// A share that can be opened and downloaded from: uploaded, not ended, not expired.
+const liveFilter = () => ({ endedAt: null, uploadPending: { $ne: true }, expiresAt: { $gt: new Date() } });
+
+const fileKeys = (shares) => shares.flatMap((s) => s.files.map((f) => f.storedName));
 
 const serializeFile = (code, file) => {
     const token = createDownloadToken({ code, fileId: file._id });
@@ -28,8 +32,10 @@ const serializeFile = (code, file) => {
     };
 };
 
+const ENDED_AS_DELETED = new Set(["deleted", "removed"]);
+
 const shareStatus = (share) => {
-    if (share.endedReason === "deleted") return "deleted";
+    if (ENDED_AS_DELETED.has(share.endedReason)) return "deleted";
     if (share.endedAt || share.expiresAt <= new Date()) return "expired";
     return "active";
 };
@@ -42,8 +48,9 @@ const serializeOwnedShare = (share, baseUrl, { includeContent = false } = {}) =>
         code: share.code,
         url: `${baseUrl}/s/${share.code}`,
         status,
-        // Why it ended: "expired", "used_up" or "deleted"; "used_up" can also
-        // appear on an active share that is in its final download window.
+        // Why it ended: "expired", "used_up", "deleted" (by the owner) or
+        // "removed" (by an admin); "used_up" can also appear on an active
+        // share that is in its final download window.
         endedReason: share.endedReason ?? (share.viewsRemaining === 0 ? "used_up" : status === "expired" ? "expired" : null),
         hasText: Boolean(share.text),
         textPreview: share.text ? share.text.slice(0, 140) : null,
@@ -69,7 +76,7 @@ const serializeOwnedShare = (share, baseUrl, { includeContent = false } = {}) =>
 // `reason` defaults to "used_up"/"expired" based on each share's state.
 const endShares = async (shares, reason) => {
     if (shares.length === 0) return;
-    await deleteFiles(shares.flatMap((s) => s.files.map((f) => f.storedName)));
+    await storage.delete(fileKeys(shares));
 
     const guestIds = shares.filter((s) => !s.ownerId).map((s) => s._id);
     if (guestIds.length) await Share.deleteMany({ _id: { $in: guestIds } });
@@ -94,6 +101,25 @@ const endShares = async (shares, reason) => {
             }))
         );
     }
+
+    for (const share of shares) {
+        notifyShare(share, "share:ended", { reason: reason ?? (share.viewsRemaining === 0 ? "used_up" : "expired") });
+    }
 };
 
-module.exports = { PREVIEWABLE_TYPES, liveFilter, serializeFile, serializeOwnedShare, shareStatus, endShares };
+// Throws away shares whose upload never finished: files and record, no history.
+const discardShares = async (shares) => {
+    if (shares.length === 0) return;
+    await storage.delete(fileKeys(shares));
+    await Share.deleteMany({ _id: { $in: shares.map((s) => s._id) } });
+};
+
+module.exports = {
+    PREVIEWABLE_TYPES,
+    liveFilter,
+    serializeFile,
+    serializeOwnedShare,
+    shareStatus,
+    endShares,
+    discardShares,
+};

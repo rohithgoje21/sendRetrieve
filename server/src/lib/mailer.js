@@ -44,4 +44,21 @@ const sendPasswordResetEmail = (user, link) => {
     });
 };
 
-module.exports = { sendMail, sendPasswordResetEmail };
+const sendVerificationEmail = (user, code, expiresInSeconds) => {
+    const minutes = Math.round(expiresInSeconds / 60);
+    return module.exports.sendMail({
+        to: user.email,
+        subject: `${code} is your sendRetrieve verification code`,
+        text:
+            `Hi ${user.name},\n\n` +
+            `Your sendRetrieve verification code is: ${code}\n\n` +
+            `It works for ${minutes} minutes. If you didn't create an account, you can ignore this email.`,
+        html:
+            `<p>Hi ${escapeHtml(user.name)},</p>` +
+            `<p>Your sendRetrieve verification code is:</p>` +
+            `<p style="font-size:28px;font-weight:bold;letter-spacing:6px;font-family:monospace">${code}</p>` +
+            `<p>It works for ${minutes} minutes. If you didn't create an account, you can ignore this email.</p>`,
+    });
+};
+
+module.exports = { sendMail, sendPasswordResetEmail, sendVerificationEmail };

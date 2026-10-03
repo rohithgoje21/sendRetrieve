@@ -1,8 +1,11 @@
+const http = require("http");
 const mongoose = require("mongoose");
 const config = require("./src/config");
 const { createApp } = require("./src/app");
+const { initRealtime, closeRealtime } = require("./src/realtime");
 const { logger } = require("./src/lib/logger");
 const { connectRedis } = require("./src/lib/redis");
+const { storage } = require("./src/lib/storage");
 const { startCleanupJob } = require("./src/lib/cleanup");
 const Share = require("./src/models/Share");
 const User = require("./src/models/User");
@@ -15,7 +18,10 @@ const warnAboutConfig = () => {
     }
     if (!config.appUrl) logger.warn("APP_URL is not set: emailed links will use the request's Host header");
     if (!config.email.resendApiKey) {
-        logger.warn("RESEND_API_KEY is not set: emails (including reset links) will be written to the log, not sent");
+        logger.warn("RESEND_API_KEY is not set: emails (reset links, verification codes) will be written to the log, not sent");
+    }
+    if (config.storage.driver === "disk") {
+        logger.warn("STORAGE_DRIVER is disk: uploaded files are lost whenever this server's disk is wiped (e.g. redeploys)");
     }
 };
 
@@ -29,21 +35,28 @@ const start = async () => {
     // index on expiresAt, which would otherwise delete owned shares' history.
     await Promise.all([Share.syncIndexes(), User.syncIndexes(), RefreshToken.syncIndexes()]);
 
+    // Fail fast if the bucket is missing or the credentials are wrong.
+    await storage.init();
+
     // Redis is optional, but if it's configured and unreachable at startup we
     // fail fast (the platform restarts us) rather than silently run without it.
     const redis = config.redisUrl ? await connectRedis(config.redisUrl) : null;
-    if (!redis) logger.info("REDIS_URL not set: rate limits and lockouts are kept in memory");
+    if (!redis) logger.info("REDIS_URL not set: rate limits, lockouts and codes are kept in memory");
 
     const cleanupTimer = startCleanupJob(config.cleanupIntervalMs);
     const app = createApp({ redis });
-    const server = app.listen(config.port, () => {
+    // One HTTP server for both the API and Socket.IO (which handles /socket.io).
+    const server = http.createServer(app);
+    await initRealtime(server, { redis });
+    server.listen(config.port, () => {
         logger.info({ event: "server.started", port: config.port }, `Listening on port ${config.port}`);
     });
 
-    // Graceful shutdown: stop taking new connections, let in-flight requests
-    // finish (up to shutdownTimeoutMs), then close database connections.
+    // Graceful shutdown: stop taking new connections, disconnect sockets, let
+    // in-flight requests finish (up to shutdownTimeoutMs), then close the
+    // database connections.
     let shuttingDown = false;
-    const shutdown = (signal) => {
+    const shutdown = async (signal) => {
         if (shuttingDown) return;
         shuttingDown = true;
         app.locals.shuttingDown = true; // /healthz starts returning 503
@@ -57,18 +70,19 @@ const start = async () => {
         }, config.shutdownTimeoutMs);
         forceExit.unref();
 
-        server.close(async () => {
-            try {
-                await mongoose.disconnect();
-                if (redis) await redis.close();
-                logger.info({ event: "server.stopped" }, "Shutdown complete");
-                process.exit(0);
-            } catch (err) {
-                logger.error({ err }, "Error during shutdown");
-                process.exit(1);
-            }
-        });
-        server.closeIdleConnections();
+        try {
+            // Closes Socket.IO and the HTTP server; resolves once requests finish.
+            const closed = closeRealtime();
+            server.closeIdleConnections();
+            await closed;
+            await mongoose.disconnect();
+            if (redis) await redis.close();
+            logger.info({ event: "server.stopped" }, "Shutdown complete");
+            process.exit(0);
+        } catch (err) {
+            logger.error({ err }, "Error during shutdown");
+            process.exit(1);
+        }
     };
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));
