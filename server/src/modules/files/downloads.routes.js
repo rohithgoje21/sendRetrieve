@@ -27,6 +27,17 @@ const createDownloadsRouter = (ctx) => {
             const file = share?.files.id(claims.fileId);
             if (!file) throw new HttpError(404, NOT_FOUND_MESSAGE);
 
+            // Thumbnails (images, made by the processing worker): small, inline,
+            // not counted as downloads.
+            if (req.query.thumb === "1") {
+                if (!file.thumbnailKey) throw new HttpError(404, "No thumbnail for this file");
+                return storage.sendDownload(res, {
+                    key: file.thumbnailKey,
+                    contentType: "image/webp",
+                    contentDisposition: contentDisposition(`${file.originalName}.webp`, { type: "inline" }),
+                });
+            }
+
             const inline = req.query.inline === "1" && PREVIEWABLE_TYPES.has(file.mimeType);
             if (!inline) {
                 const updated = await Share.findOneAndUpdate(

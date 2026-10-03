@@ -119,8 +119,38 @@ export function SelectedFileList({ files, onRemove, disabled }: { files: File[];
     );
 }
 
-// Inline preview for media the server allows to be shown in the page.
-export function FilePreview({ name, mimeType, previewUrl }: { name: string; mimeType: string; previewUrl?: string | null }) {
+interface FilePreviewProps {
+    name: string;
+    mimeType: string;
+    previewUrl?: string | null;
+    // Images: a small version made by the server, and the image's size
+    thumbnailUrl?: string | null;
+    width?: number | null;
+    height?: number | null;
+}
+
+// Inline preview for media the server allows to be shown in the page. Images
+// show their thumbnail when there is one, linking to the full image.
+export function FilePreview({ name, mimeType, previewUrl, thumbnailUrl, width, height }: FilePreviewProps) {
+    if (thumbnailUrl) {
+        const image = (
+            <img
+                src={thumbnailUrl}
+                alt={name}
+                loading="lazy"
+                width={width ?? undefined}
+                height={height ?? undefined}
+                className="h-auto max-h-80 w-full rounded-lg bg-zinc-100 object-contain dark:bg-zinc-800"
+            />
+        );
+        return previewUrl ? (
+            <a href={previewUrl} target="_blank" rel="noreferrer" title="Open full size">
+                {image}
+            </a>
+        ) : (
+            image
+        );
+    }
     if (!previewUrl) return null;
     if (mimeType.startsWith("image/")) {
         return (

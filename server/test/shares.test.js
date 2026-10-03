@@ -74,7 +74,9 @@ describe("uploading files", () => {
     test("files are stored under IDs, not their names, so same-name uploads don't collide", async () => {
         await share({}, [{ name: "photo.png", content: PNG }]);
         await share({}, [{ name: "photo.png", content: PNG }]);
-        const keys = storedFiles();
+        await settle();
+        // (each image also gets a thumbnail stored next to it)
+        const keys = storedFiles().filter((key) => !key.endsWith(".thumb.webp"));
         expect(keys).toHaveLength(2);
         for (const key of keys) expect(key).toMatch(/^shares\/[0-9a-f]{24}\/[0-9a-f]{24}$/);
     });

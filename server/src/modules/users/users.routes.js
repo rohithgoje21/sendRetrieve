@@ -9,6 +9,7 @@ const { HttpError } = require("../../shared/errors");
 const { validateBody } = require("../../shared/validate");
 const { limiter } = require("../../shared/rateLimit");
 const { publish } = require("../../infrastructure/queue");
+const { fileKeys } = require("../shares/shares.service");
 const { requireAuth } = require("../auth/middleware");
 const { issueSession, clearSession, revokeAllSessions } = require("../auth/sessions");
 
@@ -63,7 +64,7 @@ const createUsersRouter = (ctx) => {
             // Live shares stop working at once; the cleanup worker deletes their files.
             const shares = await Share.find({ ownerId: req.user._id }, { files: 1, filesState: 1 }).lean();
             await Share.deleteMany({ ownerId: req.user._id });
-            const keys = shares.filter((s) => s.filesState !== "deleted").flatMap((s) => s.files.map((f) => f.storedName));
+            const keys = fileKeys(shares.filter((s) => s.filesState !== "deleted"));
             if (keys.length) await publish("share.discarded", { shareIds: shares.map((s) => String(s._id)), keys });
             await RefreshToken.deleteMany({ userId: req.user._id });
             await User.deleteOne({ _id: req.user._id });

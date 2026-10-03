@@ -35,6 +35,9 @@ export interface CreatedShare {
     owned: boolean;
     // Lets this browser finish the upload and watch the share live.
     manageToken: string;
+    // "processing": the files are being scanned for malware; the share can
+    // be opened once that's done.
+    status: "ready" | "processing";
 }
 
 // Where and how the browser uploads one file: a signed object-storage URL,
@@ -46,7 +49,7 @@ export interface UploadTarget {
     headers: Record<string, string>;
 }
 
-export interface CreateShareResponse extends CreatedShare {
+export interface CreateShareResponse extends Omit<CreatedShare, "status"> {
     status: "uploading" | "ready";
     uploads: UploadTarget[];
     uploadExpiresAt: string | null;
@@ -59,6 +62,10 @@ export interface SharedFile {
     mimeType: string;
     downloadUrl: string;
     previewUrl: string | null;
+    // Images: a small preview, and the image's size
+    thumbnailUrl: string | null;
+    width: number | null;
+    height: number | null;
 }
 
 export interface OpenedShare {
@@ -72,7 +79,8 @@ export interface OpenedShare {
 }
 
 export type ShareStatus = "active" | "expired" | "deleted";
-export type EndedReason = "expired" | "used_up" | "deleted" | "removed";
+export type EndedReason = "expired" | "used_up" | "deleted" | "removed" | "malware";
+export type ScanStatus = "pending" | "clean" | "infected" | "skipped";
 
 export interface OwnedFile {
     id: string;
@@ -80,9 +88,13 @@ export interface OwnedFile {
     size: number;
     mimeType: string;
     downloads: number;
+    scanStatus: ScanStatus;
     // Only on the detail endpoint, for active shares
     downloadUrl?: string;
     previewUrl?: string | null;
+    thumbnailUrl?: string | null;
+    width?: number | null;
+    height?: number | null;
 }
 
 export interface OwnedShare {
@@ -93,6 +105,8 @@ export interface OwnedShare {
     hasText: boolean;
     textPreview: string | null;
     files: OwnedFile[];
+    // Still being scanned for malware: can't be opened yet
+    processing: boolean;
     totalSize: number;
     passwordProtected: boolean;
     maxViews: number | null;
@@ -134,6 +148,26 @@ export interface ShareEndedEvent {
     code: string;
     reason: EndedReason;
     at: string;
+}
+
+// The malware scan: all clear (share:ready), or a file was infected and the
+// share removed (share:blocked, followed by share:ended).
+export interface ShareReadyEvent {
+    code: string;
+    at: string;
+}
+
+export interface ShareBlockedEvent {
+    code: string;
+    fileName: string;
+    signature: string;
+    at: string;
+}
+
+// What the server answers when the browser starts watching a share.
+export interface WatchedShareState {
+    status: "uploading" | "processing" | "ready" | "ended";
+    endedReason: EndedReason | null;
 }
 
 // Admin dashboard

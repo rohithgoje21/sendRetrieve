@@ -1,5 +1,6 @@
 import { io, type Socket } from "socket.io-client";
 import { api } from "./api";
+import type { WatchedShareState } from "./types";
 
 // One Socket.IO connection for the whole app.
 //
@@ -42,10 +43,17 @@ export const setRealtimeUser = (isSignedIn: boolean) => {
 
 // Watches one share for the rest of the page's life (until the returned
 // function is called). Rooms are per connection, so it re-watches after a
-// reconnect.
-export const watchShare = (code: string, manageToken: string): (() => void) => {
+// reconnect. `onState` gets the share's state each time watching starts.
+export const watchShare = (
+    code: string,
+    manageToken: string,
+    onState?: (state: WatchedShareState) => void
+): (() => void) => {
     const s = getSocket();
-    const watch = () => s.emit("share:watch", { code, manageToken });
+    const watch = () =>
+        s.emit("share:watch", { code, manageToken }, (res: { ok: boolean; share?: WatchedShareState }) => {
+            if (res?.ok && res.share) onState?.(res.share);
+        });
     watched.add(code);
     s.on("connect", watch);
     if (s.connected) watch();

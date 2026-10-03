@@ -1,8 +1,8 @@
 // The RabbitMQ event bus against a real broker. Runs only when one is
 // available, e.g.:
 //
-//   docker compose up -d rabbitmq
-//   TEST_AMQP_URL=amqp://guest:guest@localhost:5672 npm test -w server
+//   docker run -d --name rabbit-test -p 5673:5672 rabbitmq:4
+//   TEST_AMQP_URL=amqp://guest:guest@localhost:5673 npm test -w server
 
 const { RabbitBus } = require("../src/infrastructure/queue/rabbitBus");
 const { QUEUES, retryQueue, deadLetterQueue } = require("../src/infrastructure/queue/topology");

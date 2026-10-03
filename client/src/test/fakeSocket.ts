@@ -2,6 +2,7 @@
 // and fire server events at it, with no server involved.
 
 type Handler = (payload?: unknown) => void;
+type Ack = (response: unknown) => void;
 
 export class FakeSocket {
     connected = false;
@@ -9,6 +10,8 @@ export class FakeSocket {
     // What the auth callback produced on the last connect.
     lastAuth: Record<string, unknown> | null = null;
     private handlers = new Map<string, Set<Handler>>();
+    // Replies to emits that expect an acknowledgement, by event name.
+    replies = new Map<string, unknown>();
     private authFn: ((cb: (data: Record<string, unknown>) => void) => void) | null = null;
 
     constructor(options?: { auth?: (cb: (data: Record<string, unknown>) => void) => void }) {
@@ -26,8 +29,12 @@ export class FakeSocket {
         return this;
     }
 
-    emit(event: string, payload?: unknown) {
+    emit(event: string, payload?: unknown, ack?: Ack) {
         this.emitted.push({ event, payload });
+        if (ack && this.replies.has(event)) {
+            const reply = this.replies.get(event);
+            queueMicrotask(() => ack(reply));
+        }
         return this;
     }
 
@@ -57,6 +64,7 @@ export class FakeSocket {
 
     reset() {
         this.emitted = [];
+        this.replies.clear();
     }
 }
 

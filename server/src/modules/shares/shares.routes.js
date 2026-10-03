@@ -15,6 +15,8 @@ const { createManageToken, manageTokenMatches } = require("./manageToken");
 const { baseUrl } = require("../../shared/urls");
 const { PREVIEWABLE_TYPES, liveFilter, serializeFile, discardShares, NOT_FOUND_MESSAGE } = require("./shares.service");
 const { notifyShare } = require("../realtime/realtime");
+const scanner = require("../../infrastructure/clamav");
+const { publish } = require("../../infrastructure/queue");
 
 const UPLOAD_NOT_FOUND_MESSAGE = "This upload has expired or was already completed.";
 
@@ -156,6 +158,13 @@ const createSharesRouter = (ctx) => {
         async (req, res) => {
             const { text, expiresIn, maxViews, password, files } = req.body;
             if (!text && files.length === 0) throw new HttpError(400, "Add some text or at least one file");
+            const blocked = files.findIndex((f) => config.blockedExtensions.includes(f.name.split(".").pop().toLowerCase()));
+            if (blocked !== -1) {
+                const { name } = files[blocked];
+                throw new HttpError(400, `"${name}" can't be shared: .${name.split(".").pop().toLowerCase()} files are programs or scripts.`, {
+                    field: `files.${blocked}.name`,
+                });
+            }
 
             const shareId = new mongoose.Types.ObjectId();
             const fileDocs = files.map((f) => {
@@ -222,13 +231,17 @@ const createSharesRouter = (ctx) => {
             const share = await findPendingShare(req.params.code, req.body.manageToken);
             const files = await verifyUploadedFiles(share);
 
+            // With a scanner, the share waits ("processing") until the processing
+            // worker has scanned every file clean; without one it's live now.
+            const scanning = scanner.enabled();
             const expiresAt = new Date(Date.now() + share.durationSeconds * 1000);
             const completed = await Share.findOneAndUpdate(
                 { _id: share._id, uploadPending: true },
                 {
                     $set: {
                         uploadPending: false,
-                        files,
+                        processing: scanning,
+                        files: files.map((f) => ({ ...f, scanStatus: scanning ? "pending" : "skipped" })),
                         expiresAt,
                         purgeAt: share.ownerId ? null : new Date(expiresAt.getTime() + GUEST_PURGE_DELAY_MS),
                     },
@@ -238,8 +251,9 @@ const createSharesRouter = (ctx) => {
             if (!completed) throw new HttpError(404, UPLOAD_NOT_FOUND_MESSAGE);
 
             logCreated(req, completed);
-            notifyShare(completed, "share:created");
-            res.json({ ...shareSummary(req, completed), status: "ready" });
+            await publish("share.uploaded", { shareId: String(completed._id), code: completed.code, scan: scanning });
+            if (!scanning) notifyShare(completed, "share:created");
+            res.json({ ...shareSummary(req, completed), status: scanning ? "processing" : "ready" });
         }
     );
 

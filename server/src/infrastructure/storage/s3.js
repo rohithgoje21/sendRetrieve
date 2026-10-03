@@ -132,6 +132,17 @@ const createS3Storage = () => {
             }
         },
 
+        // The whole object as a stream (e.g. for the virus scanner).
+        async openStream(key) {
+            const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+            return object.Body;
+        },
+
+        // Stores a small object the server made itself (e.g. a thumbnail).
+        async put(key, body, contentType) {
+            await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
+        },
+
         async readStart(key, bytes) {
             try {
                 const object = await client.send(

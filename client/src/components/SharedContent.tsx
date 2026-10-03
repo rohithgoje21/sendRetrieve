@@ -11,6 +11,9 @@ interface ContentFile {
     mimeType: string;
     downloadUrl?: string;
     previewUrl?: string | null;
+    thumbnailUrl?: string | null;
+    width?: number | null;
+    height?: number | null;
     downloads?: number;
 }
 
@@ -40,7 +43,14 @@ export function SharedContent({ text, files }: { text?: string | null; files: Co
                     <ul className="space-y-2">
                         {files.map((file) => (
                             <li key={file.id} className="space-y-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
-                                <FilePreview name={file.name} mimeType={file.mimeType} previewUrl={file.previewUrl} />
+                                <FilePreview
+                                    name={file.name}
+                                    mimeType={file.mimeType}
+                                    previewUrl={file.previewUrl}
+                                    thumbnailUrl={file.thumbnailUrl}
+                                    width={file.width}
+                                    height={file.height}
+                                />
                                 <div className="flex items-center gap-3">
                                     <FileIcon mimeType={file.mimeType} />
                                     <div className="min-w-0 flex-1">

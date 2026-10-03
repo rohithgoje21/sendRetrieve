@@ -63,7 +63,9 @@ const bucketKeys = async () => {
             { name: "photo.png", content: PNG },
         ]);
         expect(res.status).toBe(200);
-        expect(await bucketKeys()).toHaveLength(2);
+        await settle();
+        // the two files, and the image's thumbnail (made by the processing worker)
+        expect(await bucketKeys()).toHaveLength(3);
 
         const opened = await openShare(code).expect(200);
         const [text, image] = opened.body.files;
@@ -86,7 +88,22 @@ const bucketKeys = async () => {
         expect(Buffer.from(await shown.arrayBuffer()).equals(PNG)).toBe(true);
     });
 
-    test("complete reads the start of each object to detect executables, then deletes them", async () => {
+    test("workers read and write objects: thumbnails are served via a signed URL", async () => {
+        await storage.put("probe/hello.txt", Buffer.from("hi there"), "text/plain");
+        const chunks = [];
+        for await (const chunk of await storage.openStream("probe/hello.txt")) chunks.push(chunk);
+        expect(Buffer.concat(chunks).toString()).toBe("hi there");
+
+        const { code } = await createShare(app, {}, [{ name: "photo.png", content: PNG }]);
+        await settle();
+        const [image] = (await openShare(code).expect(200)).body.files;
+        const thumb = await request(app).get(image.thumbnailUrl).expect(302);
+        const shown = await fetch(thumb.headers.location);
+        expect(shown.status).toBe(200);
+        expect(shown.headers.get("content-type")).toBe("image/webp");
+    });
+
+        test("complete reads the start of each object to detect executables, then deletes them", async () => {
         const exe = Buffer.concat([Buffer.from("MZ"), Buffer.alloc(100)]);
         const { res } = await createShare(app, {}, [{ name: "setup.pdf", content: exe, type: "application/pdf" }]);
         expect(res.status).toBe(422);

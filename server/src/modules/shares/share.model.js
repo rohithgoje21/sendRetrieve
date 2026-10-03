@@ -10,6 +10,13 @@ const fileSchema = new mongoose.Schema({
     // until then, what the browser reported.
     mimeType: { type: String, default: "application/octet-stream" },
     downloads: { type: Number, default: 0 },
+    // Malware scan by the processing worker: pending -> clean | infected,
+    // or "skipped" when no scanner is configured.
+    scanStatus: { type: String, enum: ["pending", "clean", "infected", "skipped"], default: "pending" },
+    // Images only, made by the processing worker.
+    thumbnailKey: { type: String, default: null },
+    width: { type: Number, default: null },
+    height: { type: Number, default: null },
 });
 
 const shareSchema = new mongoose.Schema(
@@ -36,10 +43,14 @@ const shareSchema = new mongoose.Schema(
         // watch the share live.
         manageTokenHash: { type: String, default: null },
 
+        // True after upload while the processing worker scans the files. Like an
+        // upload in progress, a processing share can't be opened yet.
+        processing: { type: Boolean, default: false },
+
         // Set when a share stops being available. Its content and files are
         // deleted at that point; owned shares keep their metadata until purgeAt.
         endedAt: { type: Date, default: null },
-        endedReason: { type: String, enum: ["expired", "used_up", "deleted", "removed", null], default: null },
+        endedReason: { type: String, enum: ["expired", "used_up", "deleted", "removed", "malware", null], default: null },
         // Lifecycle of the stored files once a share ends:
         //   stored -> pending_deletion (the share has ended; the cleanup worker
         //   is deleting them) -> deleted

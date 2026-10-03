@@ -8,6 +8,7 @@ const config = require("../../config");
 //   createUploadTarget({ key, size, contentType })  -> { method, url, headers } for the browser
 //   stat(key)                                  -> { size } | null
 //   readStart(key, bytes)                      -> first bytes, to detect the real file type
+//   openStream(key), put(key, body, type)      whole-file stream (scanning); store a small object (thumbnails)
 //   sendDownload(res, { key, contentType, contentDisposition })
 //   delete(keys), list()                       cleanup; list() yields { key, modifiedAt }
 // The disk driver also has receiveUpload(req, { key, size }) behind /api/uploads.

@@ -1,5 +1,5 @@
-// The background worker process: consumes RabbitMQ queues (file cleanup,
-// notifications...) and runs the scheduled sweeps. Start with `npm run worker`
+// The background worker process: consumes RabbitMQ queues (malware scans,
+// file cleanup, notifications...) and runs the scheduled sweeps. Start with `npm run worker`
 // (or the "worker" service in docker-compose). Without RabbitMQ the API runs
 // the workers itself and this process isn't needed.
 
@@ -10,11 +10,15 @@ const { connectRedis } = require("./src/infrastructure/redis");
 const { storage } = require("./src/infrastructure/storage");
 const { initBus, getBus } = require("./src/infrastructure/queue");
 const { startWorkers } = require("./src/workers");
+const { initRealtimeEmitter } = require("./src/modules/realtime/realtime");
 
 const start = async () => {
     await mongoose.connect(config.mongoUri);
     await storage.init();
     const redis = config.redisUrl ? await connectRedis(config.redisUrl) : null;
+    // Live updates from jobs (e.g. "scan finished") reach browsers via Redis;
+    // without it they're skipped (the client still sees the result on refresh).
+    if (redis) initRealtimeEmitter(redis);
     await initBus();
     if (getBus().kind !== "rabbitmq") {
         logger.warn("AMQP_URL isn't set: with the in-process queue, the API runs the workers itself");

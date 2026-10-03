@@ -136,6 +136,26 @@ const config = {
     // file's contents rather than its name.
     blockExecutables: process.env.BLOCK_EXECUTABLES !== "false",
 
+    // Names that are refused up front, whatever the contents: programs and
+    // scripts that run when opened.
+    blockedExtensions: [
+        "exe", "scr", "com", "pif", "bat", "cmd", "msi", "msix", "appx", "dll", "sys", "cpl",
+        "ps1", "psm1", "vbs", "vbe", "jse", "wsf", "wsh", "hta", "lnk", "reg", "jar",
+    ],
+
+    // Malware scanning with ClamAV (clamd). When set, new shares stay in
+    // "processing" until every file has been scanned clean; infected shares
+    // are blocked. If the scanner is down, shares wait (fail closed).
+    scanner: {
+        host: process.env.CLAMAV_HOST || null,
+        port: Number(process.env.CLAMAV_PORT) || 3310,
+        // Big files take a while to stream and scan.
+        timeoutMs: Number(process.env.CLAMAV_TIMEOUT_MS) || 5 * 60 * 1000,
+    },
+
+    // Image thumbnails, made by the processing worker.
+    thumbnails: { width: 480 },
+
     // How often the scheduler looks for expired shares, abandoned uploads and
     // orphaned files (only one worker instance does it per interval).
     cleanupIntervalMs: 60 * 1000,

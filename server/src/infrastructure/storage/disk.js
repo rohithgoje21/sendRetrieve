@@ -87,6 +87,17 @@ const createDiskStorage = () => ({
         }
     },
 
+    async openStream(key) {
+        await fs.promises.access(pathFor(key));
+        return fs.createReadStream(pathFor(key));
+    },
+
+    async put(key, body) {
+        const target = pathFor(key);
+        await fs.promises.mkdir(path.dirname(target), { recursive: true });
+        await fs.promises.writeFile(target, body);
+    },
+
     async readStart(key, bytes) {
         const handle = await fs.promises.open(pathFor(key), "r");
         try {

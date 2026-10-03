@@ -8,7 +8,8 @@ import type { CreatedShare, CreateShareResponse, UploadTarget } from "./types";
 //      or the API itself when the server stores files on disk. File bytes
 //      never pass through the API when object storage is used.
 //   3. POST /api/shares/:code/complete. The server checks every file arrived
-//      intact and detects its real type, and the share goes live.
+//      intact and detects its real type. The share goes live, or first gets
+//      scanned for malware ("processing") when the server has a scanner.
 
 export interface ShareInput {
     text: string;
@@ -68,7 +69,7 @@ export async function createShare(input: ShareInput, { onProgress, signal }: Upl
             files: input.files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
         },
     });
-    if (created.status === "ready") return created;
+    if (created.status === "ready") return { ...created, status: "ready" };
 
     const { code, manageToken } = created;
     const total = input.files.reduce((sum, file) => sum + file.size, 0);

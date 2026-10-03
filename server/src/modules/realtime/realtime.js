@@ -1,5 +1,6 @@
 const { Server } = require("socket.io");
 const { createAdapter } = require("@socket.io/redis-adapter");
+const { Emitter } = require("@socket.io/redis-emitter");
 const config = require("../../config");
 const Share = require("../shares/share.model");
 const { normalizeCode } = require("../shares/codes");
@@ -17,9 +18,13 @@ const { logger } = require("../../infrastructure/logger");
 //
 // With Redis, events are relayed between server instances (Redis adapter),
 // so a download handled by one instance reaches a browser connected to another.
+// Processes without a Socket.IO server (the worker) send events the same way,
+// through a Redis emitter.
 
 const log = logger.child({ component: "realtime" });
 let io = null;
+let emitter = null;
+let adapterClients = [];
 
 // Same rule as the API's same-origin check: the page's own origin, APP_URL,
 // or CORS_ORIGINS. WebSockets aren't covered by CORS, so this is checked for
@@ -50,6 +55,7 @@ const initRealtime = async (httpServer, { redis = null } = {}) => {
         const sub = redis.duplicate();
         for (const client of [pub, sub]) client.on("error", (err) => log.error({ err }, "Realtime Redis error"));
         await Promise.all([pub.connect(), sub.connect()]);
+        adapterClients = [pub, sub];
         io.adapter(createAdapter(pub, sub));
     }
 
@@ -76,7 +82,14 @@ const initRealtime = async (httpServer, { redis = null } = {}) => {
                     return respond({ ok: false, error: "Share not found" });
                 }
                 socket.join(`share:${share._id}`);
-                respond({ ok: true });
+                // Its state now (read after joining, so no event falls in
+                // between): e.g. a scan may have finished before the watch.
+                const current = await Share.findById(share._id, { uploadPending: 1, processing: 1, endedAt: 1, endedReason: 1 }).lean();
+                let status = "ready";
+                if (!current || current.endedAt) status = "ended";
+                else if (current.uploadPending) status = "uploading";
+                else if (current.processing) status = "processing";
+                respond({ ok: true, share: { status, endedReason: current?.endedReason ?? null } });
             } catch (err) {
                 log.error({ err }, "share:watch failed");
                 respond({ ok: false, error: "Something went wrong" });
@@ -88,23 +101,35 @@ const initRealtime = async (httpServer, { redis = null } = {}) => {
     return io;
 };
 
+// For the worker process: its events go through Redis to the API instances,
+// which deliver them to the browsers connected there.
+const initRealtimeEmitter = (redis) => {
+    emitter = new Emitter(redis);
+};
+
 // Sends `event` about `share` to its owner and anyone watching it. Safe to
 // call when real-time isn't running (tests, scripts): it does nothing.
 const notifyShare = (share, event, payload = {}) => {
-    if (!io) return;
+    const target = io ?? emitter;
+    if (!target) return;
     const rooms = [`share:${share._id}`];
     if (share.ownerId) rooms.push(`user:${share.ownerId}`);
-    io.to(rooms).emit(event, { code: share.code, ...payload, at: new Date().toISOString() });
+    target.to(rooms).emit(event, { code: share.code, ...payload, at: new Date().toISOString() });
 };
 
 // Disconnects every socket and closes the HTTP server Socket.IO is attached
 // to; resolves once in-flight requests have finished.
-const closeRealtime = () =>
-    new Promise((resolve, reject) => {
-        if (!io) return resolve();
-        const server = io;
-        io = null;
+const closeRealtime = async () => {
+    emitter = null;
+    if (!io) return;
+    const server = io;
+    io = null;
+    await new Promise((resolve, reject) => {
         server.close((err) => (err && err.code !== "ERR_SERVER_NOT_RUNNING" ? reject(err) : resolve()));
     });
+    const clients = adapterClients;
+    adapterClients = [];
+    await Promise.all(clients.map((client) => client.close().catch(() => {})));
+};
 
-module.exports = { initRealtime, notifyShare, closeRealtime };
+module.exports = { initRealtime, initRealtimeEmitter, notifyShare, closeRealtime };

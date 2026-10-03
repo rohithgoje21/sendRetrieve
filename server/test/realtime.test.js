@@ -1,10 +1,11 @@
 const http = require("http");
-const { app, createShare, useTestDatabase } = require("./helpers");
+const { app, createShare, settle, useTestDatabase } = require("./helpers");
+const scanner = require("../src/infrastructure/clamav");
 const request = require("supertest");
 const { Server } = require("socket.io");
 const { createAdapter } = require("@socket.io/redis-adapter");
 const { io: connectClient } = require("socket.io-client");
-const { initRealtime, closeRealtime, notifyShare } = require("../src/modules/realtime/realtime");
+const { initRealtime, initRealtimeEmitter, closeRealtime, notifyShare } = require("../src/modules/realtime/realtime");
 const { connectRedis } = require("../src/infrastructure/redis");
 
 useTestDatabase();
@@ -61,7 +62,7 @@ describe("watching a share with its manage token (any sender, guests included)",
     test("sees each open and download as it happens", async () => {
         const { code, manageToken } = await createShare(http_(), { maxViews: 5 }, [{ name: "notes.txt", content: "hi" }]);
         const socket = await connect();
-        expect(await watch(socket, code, manageToken)).toEqual({ ok: true });
+        expect(await watch(socket, code, manageToken)).toEqual({ ok: true, share: { status: "ready", endedReason: null } });
 
         const opened = nextEvent(socket, "share:opened");
         const res = await http_().post(`/api/shares/${code}/open`).expect(200);
@@ -70,6 +71,46 @@ describe("watching a share with its manage token (any sender, guests included)",
         const downloaded = nextEvent(socket, "file:downloaded");
         await http_().get(res.body.files[0].downloadUrl).expect(200);
         expect(await downloaded).toMatchObject({ code, fileName: "notes.txt", downloads: 1 });
+    });
+
+    test("follows the malware scan: processing, then ready or blocked", async () => {
+        let release;
+        const gate = new Promise((resolve) => {
+            release = resolve;
+        });
+        jest.spyOn(scanner, "enabled").mockReturnValue(true);
+        jest.spyOn(scanner, "scanStream").mockImplementation(async (stream) => {
+            let content = "";
+            for await (const chunk of stream) content += chunk;
+            await gate;
+            return content.includes("EICAR") ? { infected: true, signature: "Eicar-Test-Signature" } : { infected: false };
+        });
+        try {
+            const uploading = await createShare(http_(), {}, [{ name: "c.txt", content: "later" }], { complete: false });
+            const clean = await createShare(http_(), {}, [{ name: "a.txt", content: "fine" }]);
+            const infected = await createShare(http_(), {}, [{ name: "b.txt", content: "EICAR" }]);
+            const socket = await connect();
+            expect(await watch(socket, uploading.code, uploading.manageToken)).toMatchObject({ share: { status: "uploading" } });
+            expect(await watch(socket, clean.code, clean.manageToken)).toMatchObject({ share: { status: "processing" } });
+            expect(await watch(socket, infected.code, infected.manageToken)).toMatchObject({ share: { status: "processing" } });
+
+            const events = [];
+            for (const name of ["share:ready", "share:blocked", "share:ended"]) socket.on(name, (e) => events.push({ name, code: e.code, ...e }));
+            release();
+            await settle();
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            expect(events).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({ name: "share:ready", code: clean.code }),
+                    expect.objectContaining({ name: "share:blocked", code: infected.code, fileName: "b.txt", signature: "Eicar-Test-Signature" }),
+                    expect.objectContaining({ name: "share:ended", code: infected.code, reason: "malware" }),
+                ])
+            );
+            // A watch that starts after the fact learns the outcome too.
+            expect(await watch(socket, clean.code, clean.manageToken)).toMatchObject({ share: { status: "ready" } });
+        } finally {
+            jest.restoreAllMocks();
+        }
     });
 
     test("a wrong manage token is refused and sees nothing", async () => {
@@ -159,6 +200,35 @@ const TEST_REDIS_URL = process.env.TEST_REDIS_URL;
         expect(await received).toMatchObject({ code: "CODE2345", views: 1 });
     } finally {
         await new Promise((resolve) => other.close(resolve));
-        await redis.close();
+        await Promise.all([pub.close(), sub.close(), redis.close()]);
+    }
+});
+
+(TEST_REDIS_URL ? test : test.skip)("a process without a Socket.IO server (the worker) reaches browsers via Redis", async () => {
+    const redis = await connectRedis(TEST_REDIS_URL);
+    const pub = redis.duplicate();
+    const sub = redis.duplicate();
+    await Promise.all([pub.connect(), sub.connect()]);
+
+    // The API instance the browser is connected to.
+    const apiHttp = http.createServer();
+    const api = new Server(apiHttp);
+    api.adapter(createAdapter(pub, sub));
+    api.on("connection", (socket) => socket.join("share:xyz"));
+    await new Promise((resolve) => apiHttp.listen(0, resolve));
+
+    // This process plays the worker: no server, just the emitter.
+    await closeRealtime();
+    initRealtimeEmitter(redis);
+
+    try {
+        const socket = await connect({}, `http://localhost:${apiHttp.address().port}`);
+        const received = nextEvent(socket, "share:ready");
+        notifyShare({ _id: "xyz", code: "CODE6789", ownerId: null }, "share:ready");
+        expect(await received).toMatchObject({ code: "CODE6789", at: expect.any(String) });
+    } finally {
+        await closeRealtime();
+        await new Promise((resolve) => api.close(resolve));
+        await Promise.all([pub.close(), sub.close(), redis.close()]);
     }
 });

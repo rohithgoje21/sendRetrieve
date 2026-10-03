@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Download, Eye, Radio, XCircle } from "lucide-react";
-import { useShareActivity, type ActivityItem } from "@/hooks/useRealtime";
+import type { ActivityItem } from "@/hooks/useRealtime";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +9,7 @@ const ENDED: Record<string, string> = {
     expired: "Expired",
     deleted: "Deleted",
     removed: "Removed by an administrator",
+    malware: "Blocked: malware found",
 };
 
 const describe = (item: ActivityItem) => {
@@ -37,9 +38,8 @@ function useNow(intervalMs = 30_000) {
 }
 
 // "Live activity" for a share the user just created: opens and downloads
-// appear as they happen.
-export function ShareActivity({ code, manageToken }: { code: string; manageToken: string }) {
-    const { activity, connected } = useShareActivity(code, manageToken);
+// appear as they happen (from useShareActivity).
+export function ShareActivity({ activity, connected }: { activity: ActivityItem[]; connected: boolean }) {
     const now = useNow();
 
     return (

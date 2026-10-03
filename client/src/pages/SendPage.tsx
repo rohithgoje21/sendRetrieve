@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { toast } from "sonner";
-import { CheckCircle2, Clock, Eye, Lock, Send } from "lucide-react";
+import { CheckCircle2, Clock, Eye, Lock, Send, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Input, PasswordInput, Select, Textarea } from "@/components/ui/inputs";
@@ -14,6 +14,7 @@ import { Dropzone, SelectedFileList } from "@/components/files";
 import { CopyButton } from "@/components/CopyButton";
 import { QrCodeButton } from "@/components/QrCode";
 import { ShareActivity } from "@/components/ShareActivity";
+import { useShareActivity, type LiveShareStatus } from "@/hooks/useRealtime";
 import { useConfig } from "@/hooks/useConfig";
 import { fetchSession, useSession } from "@/hooks/useSession";
 import { ApiError, isAbortError } from "@/lib/api";
@@ -225,14 +226,51 @@ function SendForm({ config, onSent }: { config: AppConfig; onSent: (share: Creat
     );
 }
 
+function BlockedResult({ status, onReset }: { status: Extract<LiveShareStatus, { status: "blocked" }>; onReset: () => void }) {
+    return (
+        <Card className="animate-fade-in p-6 text-center sm:p-8">
+            <title>Share blocked · sendRetrieve</title>
+            <ShieldAlert className="mx-auto size-10 text-red-500" aria-hidden />
+            <h2 className="mt-3 text-xl font-semibold">Share blocked</h2>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400" role="alert">
+                {status.fileName ? `"${status.fileName}"` : "One of the files"} contains malware
+                {status.signature && <span className="font-mono text-xs"> ({status.signature})</span>}. The share was removed and
+                its files deleted, so nobody can download them.
+            </p>
+            <Button variant="secondary" className="mt-6" onClick={onReset}>
+                Send something else
+            </Button>
+        </Card>
+    );
+}
+
 function SendResult({ share, onReset }: { share: CreatedShare; onReset: () => void }) {
     const code = formatCode(share.code);
+    const { activity, connected, status } = useShareActivity(share.code, share.manageToken, share.status);
+    const scanning = status.status === "processing";
+
+    if (status.status === "blocked") return <BlockedResult status={status} onReset={onReset} />;
+
     return (
         <Card className="animate-fade-in p-6 text-center sm:p-8">
             <title>Share created · sendRetrieve</title>
-            <CheckCircle2 className="mx-auto size-10 text-emerald-500" aria-hidden />
-            <h2 className="mt-3 text-xl font-semibold">Your share is ready</h2>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">Send the code or the link to whoever needs it.</p>
+            {scanning ? (
+                <>
+                    <ShieldCheck className="mx-auto size-10 animate-pulse text-indigo-500" aria-hidden />
+                    <h2 className="mt-3 text-xl font-semibold">Checking your files…</h2>
+                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400" role="status">
+                        Scanning for malware. You can send the code now: it opens as soon as the scan is done, usually in seconds.
+                    </p>
+                </>
+            ) : (
+                <>
+                    <CheckCircle2 className="mx-auto size-10 text-emerald-500" aria-hidden />
+                    <h2 className="mt-3 text-xl font-semibold">Your share is ready</h2>
+                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400" role="status">
+                        Send the code or the link to whoever needs it.
+                    </p>
+                </>
+            )}
 
             <div className="mt-6 rounded-xl bg-zinc-50 px-4 py-5 dark:bg-zinc-800/50">
                 <p className="text-xs font-medium tracking-wide text-zinc-500 uppercase">Share code</p>
@@ -269,7 +307,7 @@ function SendResult({ share, onReset }: { share: CreatedShare; onReset: () => vo
             </div>
 
             <div className="mt-6">
-                <ShareActivity code={share.code} manageToken={share.manageToken} />
+                <ShareActivity activity={activity} connected={connected} />
             </div>
 
             <p className="mt-6 text-sm text-zinc-600 dark:text-zinc-400">

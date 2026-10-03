@@ -16,10 +16,18 @@ const PREVIEWABLE_TYPES = new Set([
 
 const NOT_FOUND_MESSAGE = "Share not found. It may have expired or reached its view limit.";
 
-// A share that can be opened and downloaded from: uploaded, not ended, not expired.
-const liveFilter = () => ({ endedAt: null, uploadPending: { $ne: true }, expiresAt: { $gt: new Date() } });
+// A share that can be opened and downloaded from: uploaded, scanned, not
+// ended, not expired.
+const liveFilter = () => ({
+    endedAt: null,
+    uploadPending: { $ne: true },
+    processing: { $ne: true },
+    expiresAt: { $gt: new Date() },
+});
 
-const fileKeys = (shares) => shares.flatMap((s) => s.files.map((f) => f.storedName));
+// Every stored object belonging to these shares: files and thumbnails.
+const fileKeys = (shares) =>
+    shares.flatMap((s) => s.files.flatMap((f) => (f.thumbnailKey ? [f.storedName, f.thumbnailKey] : [f.storedName])));
 
 const serializeFile = (code, file) => {
     const token = createDownloadToken({ code, fileId: file._id });
@@ -31,6 +39,9 @@ const serializeFile = (code, file) => {
         mimeType: file.mimeType,
         downloadUrl,
         previewUrl: PREVIEWABLE_TYPES.has(file.mimeType) ? `${downloadUrl}?inline=1` : null,
+        thumbnailUrl: file.thumbnailKey ? `${downloadUrl}?thumb=1` : null,
+        width: file.width ?? null,
+        height: file.height ?? null,
     };
 };
 
@@ -51,12 +62,21 @@ const serializeOwnedShare = (share, baseUrl, { includeContent = false } = {}) =>
         url: `${baseUrl}/s/${share.code}`,
         status,
         // Why it ended: "expired", "used_up", "deleted" (by the owner) or
-        // "removed" (by an admin); "used_up" can also appear on an active
+        // "removed" (by an admin) or "malware"; "used_up" can also appear on an active
         // share that is in its final download window.
         endedReason: share.endedReason ?? (share.viewsRemaining === 0 ? "used_up" : status === "expired" ? "expired" : null),
         hasText: Boolean(share.text),
         textPreview: share.text ? share.text.slice(0, 140) : null,
-        files: share.files.map((f) => ({ id: f._id, name: f.originalName, size: f.size, mimeType: f.mimeType, downloads: f.downloads })),
+        files: share.files.map((f) => ({
+            id: f._id,
+            name: f.originalName,
+            size: f.size,
+            mimeType: f.mimeType,
+            downloads: f.downloads,
+            scanStatus: f.scanStatus,
+        })),
+        // Still being scanned: not openable yet.
+        processing: Boolean(share.processing),
         totalSize: share.files.reduce((sum, f) => sum + f.size, 0),
         passwordProtected: Boolean(share.passwordHash),
         maxViews: share.maxViews,
@@ -100,6 +120,7 @@ const endShares = async (shares, reason) => {
                         endedAt: now,
                         endedReason: endedReasonFor(s, reason),
                         text: null,
+                        processing: false,
                         filesState: s.files.length ? "pending_deletion" : "deleted",
                         purgeAt: s.ownerId ? ownedPurgeAt : guestPurgeAt,
                     },
@@ -116,7 +137,7 @@ const endShares = async (shares, reason) => {
             code: share.code,
             ownerId: share.ownerId ? String(share.ownerId) : null,
             reason: ended.reason,
-            keys: share.files.map((f) => f.storedName),
+            keys: fileKeys([share]),
         });
         notifyShare(share, "share:ended", ended);
     }
@@ -132,6 +153,7 @@ const discardShares = async (shares) => {
 };
 
 module.exports = {
+    fileKeys,
     NOT_FOUND_MESSAGE,
     PREVIEWABLE_TYPES,
     liveFilter,

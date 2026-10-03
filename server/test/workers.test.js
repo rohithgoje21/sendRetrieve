@@ -48,7 +48,9 @@ describe("emails go through the queue", () => {
         const { body: overview } = await agent.get("/api/admin/queues").expect(200);
         expect(overview.broker).toBe("memory");
         expect(overview.queues.find((q) => q.name === "sr.notifications")).toMatchObject({ deadLettered: 1, consumers: 1 });
-        expect(overview.circuitBreakers).toEqual([expect.objectContaining({ name: "email" })]);
+        expect(overview.circuitBreakers).toEqual(
+            expect.arrayContaining([expect.objectContaining({ name: "email" }), expect.objectContaining({ name: "virus-scanner" })])
+        );
 
         const { body: dead } = await agent.get("/api/admin/queues/sr.notifications/dead-letters").expect(200);
         expect(dead.messages[0]).toMatchObject({ error: "invalid API key", message: { type: "email.requested", data: { template: "password-reset" } } });

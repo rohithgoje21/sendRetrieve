@@ -29,10 +29,12 @@ const EMPTY: Record<ShareStatus, { icon: typeof Inbox; title: string; body: stri
 };
 
 function StatusBadge({ share }: { share: OwnedShare }) {
+    if (share.endedReason === "malware") return <Badge tone="danger">Blocked: malware</Badge>;
     if (share.endedReason === "removed") return <Badge tone="danger">Removed by an admin</Badge>;
     if (share.status === "deleted") return <Badge tone="danger">Deleted</Badge>;
     if (share.endedReason === "used_up") return <Badge tone="warning">Used up</Badge>;
     if (share.status === "expired") return <Badge>Expired</Badge>;
+    if (share.processing) return <Badge tone="warning">Scanning…</Badge>;
     return <Badge tone="success">Active</Badge>;
 }
 
