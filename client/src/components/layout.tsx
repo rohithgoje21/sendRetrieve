@@ -1,8 +1,9 @@
 import { Suspense, useEffect, useRef, useState } from "react";
-import { Link, NavLink, Outlet, ScrollRestoration } from "react-router";
+import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from "react-router";
 import { Toaster } from "sonner";
-import { ChevronDown, FolderOpen, LogOut, Moon, Settings, Sun } from "lucide-react";
+import { ChevronDown, FolderOpen, LogOut, MailWarning, Moon, Settings, ShieldCheck, Sun } from "lucide-react";
 import { useLogout, useSession } from "@/hooks/useSession";
+import { useRealtimeUpdates } from "@/hooks/useRealtime";
 import { useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import type { User } from "@/lib/types";
@@ -100,6 +101,11 @@ function UserMenu({ user }: { user: User }) {
                     <Link role="menuitem" to="/account" onClick={close} className={itemClass}>
                         <Settings /> Account settings
                     </Link>
+                    {user.role === "admin" && (
+                        <Link role="menuitem" to="/admin" onClick={close} className={itemClass}>
+                            <ShieldCheck /> Admin
+                        </Link>
+                    )}
                     <div className="my-1 h-px bg-zinc-200 dark:bg-zinc-800" />
                     <button
                         role="menuitem"
@@ -155,11 +161,36 @@ function Header() {
     );
 }
 
+// Shown to signed-in users until they confirm their email address.
+function VerifyEmailBanner() {
+    const { user } = useSession();
+    const { pathname } = useLocation();
+    if (!user || user.emailVerified || pathname === "/verify-email") return null;
+    return (
+        <div className="border-b border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+            <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 py-2 text-sm">
+                <span className="flex items-center gap-2">
+                    <MailWarning className="size-4 shrink-0" aria-hidden />
+                    Please verify your email address, {user.email}.
+                </span>
+                <Link
+                    to={`/verify-email?next=${encodeURIComponent(pathname)}`}
+                    className="font-medium underline underline-offset-2"
+                >
+                    Verify now
+                </Link>
+            </div>
+        </div>
+    );
+}
+
 export function Layout() {
     const { resolvedTheme } = useTheme();
+    useRealtimeUpdates();
     return (
         <div className="flex min-h-dvh flex-col">
             <Header />
+            <VerifyEmailBanner />
             <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:py-12">
                 <Suspense fallback={<PageSpinner />}>
                     <Outlet />

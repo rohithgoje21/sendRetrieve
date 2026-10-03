@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { buttonClasses } from "@/components/ui/styles";
 import { CopyButton } from "@/components/CopyButton";
+import { QrCodeButton } from "@/components/QrCode";
 import { SharedContent } from "@/components/SharedContent";
 import { api } from "@/lib/api";
 import { formatCode, formatDateTime, formatRelative, formatSize, pluralize } from "@/lib/format";
@@ -28,6 +29,7 @@ const EMPTY: Record<ShareStatus, { icon: typeof Inbox; title: string; body: stri
 };
 
 function StatusBadge({ share }: { share: OwnedShare }) {
+    if (share.endedReason === "removed") return <Badge tone="danger">Removed by an admin</Badge>;
     if (share.status === "deleted") return <Badge tone="danger">Deleted</Badge>;
     if (share.endedReason === "used_up") return <Badge tone="warning">Used up</Badge>;
     if (share.status === "expired") return <Badge>Expired</Badge>;
@@ -130,6 +132,7 @@ function ShareCard({ share }: { share: OwnedShare }) {
                     {active ? (
                         <>
                             <CopyButton value={share.url} label="Copy link" />
+                            <QrCodeButton url={share.url} code={share.code} />
                             <Button variant="secondary" size="sm" onClick={() => setExpanded((e) => !e)} aria-expanded={expanded}>
                                 <Eye aria-hidden />
                                 {expanded ? "Hide" : "View"}

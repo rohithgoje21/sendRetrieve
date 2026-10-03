@@ -3,7 +3,7 @@
 import { lazy } from "react";
 import type { RouteObject } from "react-router";
 import { Layout } from "@/components/layout";
-import { GuestOnly, RequireAuth } from "@/components/guards";
+import { GuestOnly, RequireAdmin, RequireAuth } from "@/components/guards";
 import HomeShell from "@/pages/HomeShell";
 import SendPage from "@/pages/SendPage";
 import RetrievePage from "@/pages/RetrievePage";
@@ -16,6 +16,8 @@ const ForgotPasswordPage = lazy(() => import("@/pages/ForgotPasswordPage"));
 const ResetPasswordPage = lazy(() => import("@/pages/ResetPasswordPage"));
 const MySharesPage = lazy(() => import("@/pages/MySharesPage"));
 const AccountPage = lazy(() => import("@/pages/AccountPage"));
+const VerifyEmailPage = lazy(() => import("@/pages/VerifyEmailPage"));
+const AdminPage = lazy(() => import("@/pages/AdminPage"));
 
 export const routes: RouteObject[] = [
     {
@@ -44,6 +46,11 @@ export const routes: RouteObject[] = [
                 children: [
                     { path: "shares", element: <MySharesPage /> },
                     { path: "account", element: <AccountPage /> },
+                    { path: "verify-email", element: <VerifyEmailPage /> },
+                    {
+                        element: <RequireAdmin />,
+                        children: [{ path: "admin", element: <AdminPage /> }],
+                    },
                 ],
             },
             { path: "*", element: <NotFoundPage /> },

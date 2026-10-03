@@ -56,7 +56,14 @@ export function mockApi(routes: Record<string, MockRoute>) {
 
 export const guestSession: MockResponse = [401, { error: "Please log in", code: "auth_required" }];
 
-export const testUser: User = { id: "u1", email: "ada@example.com", name: "Ada Lovelace", createdAt: "2026-01-01T00:00:00.000Z" };
+export const testUser: User = {
+    id: "u1",
+    email: "ada@example.com",
+    name: "Ada Lovelace",
+    role: "user",
+    emailVerified: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+};
 
 export const testConfig: AppConfig = {
     maxFiles: 3,
@@ -71,6 +78,8 @@ export const testConfig: AppConfig = {
     downloadWindowSeconds: 600,
     sharePassword: { min: 4, max: 72 },
     accountPassword: { min: 8, max: 72 },
+    uploadWindowSeconds: 3600,
+    storage: "s3",
 };
 
 export const inHours = (hours: number) => new Date(Date.now() + hours * 3600 * 1000).toISOString();

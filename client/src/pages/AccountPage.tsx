@@ -1,13 +1,14 @@
 import { useState, type ReactNode } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { BadgeCheck } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Input, PasswordInput } from "@/components/ui/inputs";
-import { Alert, Card } from "@/components/ui/feedback";
+import { Alert, Badge, Card } from "@/components/ui/feedback";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useSession, useSetSession } from "@/hooks/useSession";
 import { api } from "@/lib/api";
@@ -48,7 +49,21 @@ function ProfileForm({ user }: { user: User }) {
             <Field label="Name" error={formState.errors.name?.message}>
                 <Input autoComplete="name" {...register("name")} />
             </Field>
-            <Field label="Email" hint={`Member since ${formatDate(user.createdAt)}`}>
+            <Field
+                label="Email"
+                hint={`Member since ${formatDate(user.createdAt)}`}
+                action={
+                    user.emailVerified ? (
+                        <Badge tone="success">
+                            <BadgeCheck className="size-3" aria-hidden /> Verified
+                        </Badge>
+                    ) : (
+                        <Link to="/verify-email?next=/account" className="text-xs font-medium text-amber-700 underline underline-offset-2 dark:text-amber-400">
+                            Not verified · Verify now
+                        </Link>
+                    )
+                }
+            >
                 <Input type="email" value={user.email} readOnly />
             </Field>
             {formState.errors.root && <Alert tone="error">{formState.errors.root.message}</Alert>}

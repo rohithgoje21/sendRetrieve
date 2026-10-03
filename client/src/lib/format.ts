@@ -31,7 +31,7 @@ export const formatRelative = (iso: string, now = Date.now()): string => {
     for (const [unit, size] of UNITS) {
         if (Math.abs(seconds) >= size) return relative.format(Math.round(seconds / size), unit);
     }
-    return seconds >= 0 ? "in under a minute" : "just now";
+    return seconds > 0 ? "in under a minute" : "just now";
 };
 
 export const pluralize = (count: number, singular: string, plural = `${singular}s`): string =>

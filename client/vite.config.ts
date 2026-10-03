@@ -22,6 +22,8 @@ export default defineConfig({
         proxy: {
             "/api": apiProxy,
             "/healthz": apiProxy,
+            // Live updates (Socket.IO), including the WebSocket upgrade.
+            "/socket.io": { ...apiProxy, ws: true },
         },
     },
     test: {

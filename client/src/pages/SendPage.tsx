@@ -12,6 +12,8 @@ import { Input, PasswordInput, Select, Textarea } from "@/components/ui/inputs";
 import { Alert, Badge, Card, PageSpinner, Progress } from "@/components/ui/feedback";
 import { Dropzone, SelectedFileList } from "@/components/files";
 import { CopyButton } from "@/components/CopyButton";
+import { QrCodeButton } from "@/components/QrCode";
+import { ShareActivity } from "@/components/ShareActivity";
 import { useConfig } from "@/hooks/useConfig";
 import { fetchSession, useSession } from "@/hooks/useSession";
 import { ApiError, isAbortError } from "@/lib/api";
@@ -79,26 +81,25 @@ function SendForm({ config, onSent }: { config: AppConfig; onSent: (share: Creat
             return;
         }
 
-        const body = new FormData();
-        if (values.text.trim()) body.append("text", values.text);
-        body.append("expiresIn", values.expiresIn);
-        body.append("maxViews", values.maxViews);
-        if (values.password) body.append("password", values.password);
-        files.forEach((file) => body.append("files", file));
-
         const controller = new AbortController();
         setUpload(controller);
         if (files.length) setProgress({ loaded: 0, total: files.reduce((sum, f) => sum + f.size, 0) });
 
         try {
-            // Signed in? Refresh the session now, so a long upload isn't
-            // rejected (or saved as a guest share) because it expired.
+            // Signed in? Make sure the session is fresh, so the share is saved
+            // to the account rather than created as a guest share.
             if (user) await queryClient.fetchQuery({ queryKey: sessionKey, queryFn: fetchSession, staleTime: 0 });
 
-            const share = await createShare(body, {
-                signal: controller.signal,
-                onProgress: (loaded, total) => setProgress({ loaded, total }),
-            });
+            const share = await createShare(
+                {
+                    text: values.text,
+                    expiresIn: values.expiresIn,
+                    maxViews: values.maxViews === "unlimited" ? null : Number(values.maxViews),
+                    password: values.password,
+                    files,
+                },
+                { signal: controller.signal, onProgress: (loaded, total) => setProgress({ loaded, total }) }
+            );
             if (share.owned) queryClient.invalidateQueries({ queryKey: sharesKey });
             onSent(share);
         } catch (err) {
@@ -246,6 +247,10 @@ function SendResult({ share, onReset }: { share: CreatedShare; onReset: () => vo
                 <CopyButton value={share.url} label="Copy link" size="md" />
             </div>
 
+            <div className="mt-3 flex justify-center">
+                <QrCodeButton url={share.url} code={share.code} />
+            </div>
+
             <div className="mt-4 flex flex-wrap justify-center gap-2">
                 <Badge>
                     <Clock className="size-3" aria-hidden />
@@ -261,6 +266,10 @@ function SendResult({ share, onReset }: { share: CreatedShare; onReset: () => vo
                         Password protected
                     </Badge>
                 )}
+            </div>
+
+            <div className="mt-6">
+                <ShareActivity code={share.code} manageToken={share.manageToken} />
             </div>
 
             <p className="mt-6 text-sm text-zinc-600 dark:text-zinc-400">

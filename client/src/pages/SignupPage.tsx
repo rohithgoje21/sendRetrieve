@@ -33,7 +33,9 @@ export default function SignupPage() {
             const { user } = await api<{ user: User }>("/api/auth/register", { method: "POST", body: values });
             setSession(user);
             toast.success("Account created");
-            navigate(safeNextPath(params.get("next")), { replace: true });
+            // Next: confirm the email address (a code was just sent).
+            const next = encodeURIComponent(safeNextPath(params.get("next")));
+            navigate(`/verify-email?new=1&next=${next}`, { replace: true });
         } catch (err) {
             showServerError(form)(err);
         }
