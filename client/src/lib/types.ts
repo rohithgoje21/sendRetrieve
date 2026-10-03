@@ -40,13 +40,40 @@ export interface CreatedShare {
     status: "ready" | "processing";
 }
 
-// Where and how the browser uploads one file: a signed object-storage URL,
-// or the API's own upload endpoint (disk storage).
-export interface UploadTarget {
-    fileId: string;
+// A signed request the browser sends file bytes with: to object storage, or
+// to the API's own upload endpoint (disk storage).
+export interface SignedUpload {
     method: "PUT";
     url: string;
     headers: Record<string, string>;
+}
+
+// How one file is uploaded: whole, to a signed URL, or (big files) in parts,
+// whose URLs come from POST /api/shares/:code/uploads/:fileId/parts.
+export type UploadTarget =
+    | ({ fileId: string; multipart: null } & SignedUpload)
+    | { fileId: string; multipart: { partSize: number; partCount: number } };
+
+export interface PartTarget extends SignedUpload {
+    partNumber: number;
+}
+
+// POST /api/shares/:code/resume: what the server already has. Files not yet
+// uploaded come with a fresh URL (small files) or the parts received so far.
+export interface ResumeResponse {
+    code: string;
+    status: "uploading";
+    uploadExpiresAt: string;
+    files: {
+        fileId: string;
+        name: string;
+        size: number;
+        uploaded: boolean;
+        multipart: { partSize: number; partCount: number; uploadedParts: number[] } | null;
+        method?: "PUT";
+        url?: string;
+        headers?: Record<string, string>;
+    }[];
 }
 
 export interface CreateShareResponse extends Omit<CreatedShare, "status"> {

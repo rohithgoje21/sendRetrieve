@@ -16,10 +16,13 @@ if (TEST_S3_ENDPOINT) {
         S3_CREATE_BUCKET: "true",
         S3_ACCESS_KEY_ID: process.env.TEST_S3_ACCESS_KEY_ID || "sendretrieve",
         S3_SECRET_ACCESS_KEY: process.env.TEST_S3_SECRET_ACCESS_KEY || "sendretrieve-dev-secret",
+        // S3's smallest allowed part size
+        UPLOAD_PART_SIZE_MB: "5",
     });
 }
 
-const { app, createShare, PNG, settle, useTestDatabase } = require("./helpers");
+const crypto = require("crypto");
+const { app, createShare, uploadInParts, PNG, settle, useTestDatabase } = require("./helpers");
 const request = require("supertest");
 const Share = require("../src/modules/shares/share.model");
 const { storage } = require("../src/infrastructure/storage");
@@ -103,7 +106,47 @@ const bucketKeys = async () => {
         expect(shown.headers.get("content-type")).toBe("image/webp");
     });
 
-        test("complete reads the start of each object to detect executables, then deletes them", async () => {
+        test("big files go up in parts straight to storage, and an interrupted upload resumes", async () => {
+        const MB = 1024 * 1024;
+        const big = crypto.randomBytes(11 * MB);
+        big.write("DATA", 0);
+        const created = (
+            await request(app)
+                .post("/api/shares")
+                .send({ files: [{ name: "video.bin", size: big.length, type: "application/octet-stream" }] })
+                .expect(201)
+        ).body;
+        const [target] = created.uploads;
+        expect(target.multipart).toEqual({ partSize: 5 * MB, partCount: 3 });
+
+        await uploadInParts(request(app), created, target, big, [1, 3]);
+        const resumed = await request(app).post(`/api/shares/${created.code}/resume`).send({ manageToken: created.manageToken }).expect(200);
+        expect(resumed.body.files[0]).toMatchObject({ uploaded: false, multipart: { uploadedParts: [1, 3] } });
+        await uploadInParts(request(app), created, target, big, [2]);
+        await request(app).post(`/api/shares/${created.code}/complete`).send({ manageToken: created.manageToken }).expect(200);
+
+        const opened = await openShare(created.code).expect(200);
+        const download = await request(app).get(opened.body.files[0].downloadUrl).expect(302);
+        const file = Buffer.from(await (await fetch(download.headers.location)).arrayBuffer());
+        expect(file.equals(big)).toBe(true);
+    });
+
+    test("cancelling a multipart upload aborts it in storage", async () => {
+        const big = crypto.randomBytes(6 * 1024 * 1024);
+        const created = (
+            await request(app).post("/api/shares").send({ files: [{ name: "a.bin", size: big.length, type: "" }] }).expect(201)
+        ).body;
+        await uploadInParts(request(app), created, created.uploads[0], big, [1]);
+        const { files } = await Share.findOne({ code: created.code }).lean();
+        const upload = { key: files[0].storedName, uploadId: files[0].upload.uploadId };
+        expect(await storage.listUploadedParts(upload)).toHaveLength(1);
+
+        await request(app).post(`/api/shares/${created.code}/cancel`).send({ manageToken: created.manageToken }).expect(204);
+        await settle();
+        expect(await storage.listUploadedParts(upload)).toBeNull();
+    });
+
+    test("complete reads the start of each object to detect executables, then deletes them", async () => {
         const exe = Buffer.concat([Buffer.from("MZ"), Buffer.alloc(100)]);
         const { res } = await createShare(app, {}, [{ name: "setup.pdf", content: exe, type: "application/pdf" }]);
         expect(res.status).toBe(422);

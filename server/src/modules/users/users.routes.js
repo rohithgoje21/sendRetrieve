@@ -9,7 +9,7 @@ const { HttpError } = require("../../shared/errors");
 const { validateBody } = require("../../shared/validate");
 const { limiter } = require("../../shared/rateLimit");
 const { publish } = require("../../infrastructure/queue");
-const { fileKeys } = require("../shares/shares.service");
+const { fileKeys, pendingUploads } = require("../shares/shares.service");
 const { requireAuth } = require("../auth/middleware");
 const { issueSession, clearSession, revokeAllSessions } = require("../auth/sessions");
 
@@ -65,7 +65,10 @@ const createUsersRouter = (ctx) => {
             const shares = await Share.find({ ownerId: req.user._id }, { files: 1, filesState: 1 }).lean();
             await Share.deleteMany({ ownerId: req.user._id });
             const keys = fileKeys(shares.filter((s) => s.filesState !== "deleted"));
-            if (keys.length) await publish("share.discarded", { shareIds: shares.map((s) => String(s._id)), keys });
+            const uploads = pendingUploads(shares);
+            if (keys.length || uploads.length) {
+                await publish("share.discarded", { shareIds: shares.map((s) => String(s._id)), keys, uploads });
+            }
             await RefreshToken.deleteMany({ userId: req.user._id });
             await User.deleteOne({ _id: req.user._id });
             req.log.info({ event: "account.deleted", sharesDeleted: shares.length }, "Account deleted");

@@ -34,6 +34,16 @@ export const formatRelative = (iso: string, now = Date.now()): string => {
     return seconds > 0 ? "in under a minute" : "just now";
 };
 
+// Time left for an upload: "a few seconds left", "about 3 min left", "about 2 h 5 min left"
+export const formatTimeLeft = (seconds: number): string => {
+    if (seconds < 10) return "a few seconds left";
+    if (seconds < 60) return `about ${Math.round(seconds / 10) * 10} s left`;
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `about ${minutes} min left`;
+    const hours = Math.floor(minutes / 60);
+    return `about ${hours} h${minutes % 60 ? ` ${minutes % 60} min` : ""} left`;
+};
+
 export const pluralize = (count: number, singular: string, plural = `${singular}s`): string =>
     `${count} ${count === 1 ? singular : plural}`;
 

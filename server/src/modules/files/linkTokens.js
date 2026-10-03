@@ -5,7 +5,7 @@ const config = require("../../config");
 //   download  /api/files/:token, for someone who just opened a share (and
 //             passed its password and view-limit checks)
 //   upload    /api/uploads/:token, disk storage's stand-in for a signed S3
-//             upload URL
+//             upload URL (a whole file, or one part of a multipart upload)
 // Each token names its purpose, so one kind can't be used as the other.
 
 const sign = (data) => crypto.createHmac("sha256", config.tokenSecret).update(data).digest("base64url");
@@ -45,11 +45,12 @@ const verifyDownloadToken = (token) => {
     return claims && { code: claims.c, fileId: claims.f };
 };
 
-const createUploadToken = ({ key, size }) => createToken("upload", { k: key, s: size }, config.uploadWindowSeconds);
+const createUploadToken = ({ key, size, uploadId, partNumber }, ttlSeconds = config.uploadWindowSeconds) =>
+    createToken("upload", { k: key, s: size, ...(uploadId ? { u: uploadId, n: partNumber } : {}) }, ttlSeconds);
 
 const verifyUploadToken = (token) => {
     const claims = verifyToken("upload", token);
-    return claims && { key: claims.k, size: claims.s };
+    return claims && { key: claims.k, size: claims.s, uploadId: claims.u ?? null, partNumber: claims.n ?? null };
 };
 
 module.exports = { createDownloadToken, verifyDownloadToken, createUploadToken, verifyUploadToken };

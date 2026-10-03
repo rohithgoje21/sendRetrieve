@@ -10,7 +10,8 @@ const { endShares, discardShares, fileKeys } = require("../modules/shares/shares
 //
 //   every minute   end expired shares and discard abandoned uploads;
 //                  re-queue file deletions and scans that seem to have been lost
-//   every hour     delete stored files that no share references (orphans)
+//   every hour     delete stored files that no share references (orphans),
+//                  and parts of uploads abandoned long ago (disk storage)
 
 // Stored files younger than this may belong to an upload that hasn't been
 // recorded yet, so the orphan sweep leaves them alone.
@@ -101,6 +102,9 @@ const startScheduler = ({ locks, log }) => {
             .runExclusive("orphan-sweep", ORPHAN_SWEEP_EVERY_MS, async () => {
                 const removed = await deleteOrphanFiles();
                 if (removed) log.info({ event: "sweep.orphans_removed", removed }, "Removed orphaned files");
+                // No upload can still be going on after its maximum window.
+                const aborted = (await storage.abortStaleUploads?.((config.maxUploadWindowSeconds + 3600) * 1000)) ?? 0;
+                if (aborted) log.info({ event: "sweep.stale_uploads_aborted", aborted }, "Removed abandoned upload parts");
             })
             .catch((err) => log.error({ err, event: "sweep.failed" }, "Orphan sweep failed"));
 

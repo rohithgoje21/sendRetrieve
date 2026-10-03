@@ -1,13 +1,19 @@
 const {
     S3Client,
+    AbortMultipartUploadCommand,
+    CompleteMultipartUploadCommand,
     CreateBucketCommand,
+    CreateMultipartUploadCommand,
     DeleteObjectsCommand,
     GetObjectCommand,
     HeadBucketCommand,
     HeadObjectCommand,
     ListObjectsV2Command,
+    ListPartsCommand,
     PutBucketCorsCommand,
+    PutBucketLifecycleConfigurationCommand,
     PutObjectCommand,
+    UploadPartCommand,
 } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const config = require("../../config");
@@ -22,6 +28,7 @@ const { logger } = require("../logger");
 const log = logger.child({ component: "storage" });
 
 const isNotFound = (err) => err?.name === "NotFound" || err?.name === "NoSuchKey" || err?.$metadata?.httpStatusCode === 404;
+const isNoSuchUpload = (err) => err?.name === "NoSuchUpload" || err?.Code === "NoSuchUpload" || err?.$metadata?.httpStatusCode === 404;
 
 const createS3Storage = () => {
     const { endpoint, publicEndpoint, region, bucket, accessKeyId, secretAccessKey, forcePathStyle, createBucket } =
@@ -84,6 +91,33 @@ const createS3Storage = () => {
         }
     };
 
+    // Multipart uploads that are never completed or aborted keep using space
+    // (invisibly: they aren't objects yet). The app aborts the ones it knows
+    // were abandoned; this rule catches the rest. Only set on a bucket the app
+    // created, since it replaces any existing lifecycle rules. (MinIO also
+    // cleans up stale uploads by itself after 24 hours.)
+    const configureLifecycle = async () => {
+        try {
+            await client.send(
+                new PutBucketLifecycleConfigurationCommand({
+                    Bucket: bucket,
+                    LifecycleConfiguration: {
+                        Rules: [
+                            {
+                                ID: "abort-incomplete-uploads",
+                                Status: "Enabled",
+                                Filter: { Prefix: "shares/" },
+                                AbortIncompleteMultipartUpload: { DaysAfterInitiation: 2 },
+                            },
+                        ],
+                    },
+                })
+            );
+        } catch (err) {
+            log.info({ event: "storage.lifecycle_skipped", reason: err.name }, "Couldn't set the bucket lifecycle rule");
+        }
+    };
+
     return {
         driver: "s3",
         publicOrigin,
@@ -97,6 +131,7 @@ const createS3Storage = () => {
                 }
                 await client.send(new CreateBucketCommand({ Bucket: bucket }));
                 log.info({ event: "storage.bucket_created", bucket }, "Created storage bucket");
+                await configureLifecycle();
             }
             await configureCors();
             log.info({ event: "storage.ready", bucket, endpoint: endpoint || "aws" }, "Object storage ready");
@@ -120,6 +155,72 @@ const createS3Storage = () => {
                 { expiresIn: config.uploadWindowSeconds, signableHeaders: new Set(["content-type", "content-length"]) }
             );
             return { method: "PUT", url, headers: { "Content-Type": contentType } };
+        },
+
+        // ---- Multipart (resumable) uploads ----
+        // The browser uploads each part to its own signed URL. Which parts
+        // arrived is asked of storage (ListParts), so the browser never needs
+        // to read response headers such as ETag.
+
+        async createMultipartUpload({ key, contentType }) {
+            const { UploadId } = await client.send(
+                new CreateMultipartUploadCommand({ Bucket: bucket, Key: key, ContentType: contentType })
+            );
+            return UploadId;
+        },
+
+        // A URL for one part. Its exact size is part of the signature.
+        async signUploadPart({ key, uploadId, partNumber, size }) {
+            const url = await getSignedUrl(
+                signer,
+                new UploadPartCommand({ Bucket: bucket, Key: key, UploadId: uploadId, PartNumber: partNumber, ContentLength: size }),
+                { expiresIn: config.uploads.partUrlSeconds, signableHeaders: new Set(["content-length"]) }
+            );
+            return { method: "PUT", url, headers: {} };
+        },
+
+        // Parts received so far: [{ partNumber, size, etag }], or null if the
+        // upload no longer exists (completed or aborted).
+        async listUploadedParts({ key, uploadId }) {
+            const parts = [];
+            let PartNumberMarker;
+            try {
+                for (;;) {
+                    const page = await client.send(
+                        new ListPartsCommand({ Bucket: bucket, Key: key, UploadId: uploadId, PartNumberMarker })
+                    );
+                    for (const p of page.Parts ?? []) parts.push({ partNumber: p.PartNumber, size: p.Size, etag: p.ETag });
+                    if (!page.IsTruncated) break;
+                    PartNumberMarker = page.NextPartNumberMarker;
+                }
+            } catch (err) {
+                if (isNoSuchUpload(err)) return null;
+                throw err;
+            }
+            return parts;
+        },
+
+        async completeMultipartUpload({ key, uploadId, parts }) {
+            await client.send(
+                new CompleteMultipartUploadCommand({
+                    Bucket: bucket,
+                    Key: key,
+                    UploadId: uploadId,
+                    MultipartUpload: {
+                        Parts: [...parts]
+                            .sort((a, b) => a.partNumber - b.partNumber)
+                            .map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })),
+                    },
+                })
+            );
+        },
+
+        async abortMultipartUpload({ key, uploadId }) {
+            try {
+                await client.send(new AbortMultipartUploadCommand({ Bucket: bucket, Key: key, UploadId: uploadId }));
+            } catch (err) {
+                if (!isNoSuchUpload(err)) throw err;
+            }
         },
 
         async stat(key) {

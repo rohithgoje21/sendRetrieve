@@ -55,8 +55,17 @@ const createShare = z.object({
 
 const manageShare = z.object({ manageToken: requiredString("Manage token") });
 
+// Signed URLs for some parts of a multipart upload.
+const uploadParts = manageShare.extend({
+    partNumbers: z
+        .array(z.number().int().min(1).max(10_000), { error: "partNumbers must be a list of part numbers" })
+        .min(1, "Ask for at least one part")
+        .max(config.uploads.maxPartsPerRequest, `Ask for at most ${config.uploads.maxPartsPerRequest} parts at a time`)
+        .transform((numbers) => [...new Set(numbers)].sort((a, b) => a - b)),
+});
+
 const openShare = z.object({
     password: z.string().max(limits.maxPasswordLength).optional(),
 });
 
-module.exports = { createShare, manageShare, openShare };
+module.exports = { createShare, manageShare, uploadParts, openShare };

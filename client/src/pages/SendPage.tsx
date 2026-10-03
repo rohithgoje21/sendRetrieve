@@ -1,26 +1,29 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { toast } from "sonner";
-import { CheckCircle2, Clock, Eye, Lock, Send, ShieldAlert, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Clock, Eye, FolderOpen, Lock, Send, ShieldAlert, ShieldCheck, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Input, PasswordInput, Select, Textarea } from "@/components/ui/inputs";
-import { Alert, Badge, Card, PageSpinner, Progress } from "@/components/ui/feedback";
-import { Dropzone, SelectedFileList } from "@/components/files";
+import { Alert, Badge, Card, PageSpinner } from "@/components/ui/feedback";
+import { Dropzone, FileIcon, SelectedFileList } from "@/components/files";
+import { UploadPanel } from "@/components/UploadPanel";
 import { CopyButton } from "@/components/CopyButton";
 import { QrCodeButton } from "@/components/QrCode";
 import { ShareActivity } from "@/components/ShareActivity";
 import { useShareActivity, type LiveShareStatus } from "@/hooks/useRealtime";
+import { useUpload } from "@/hooks/useUpload";
 import { useConfig } from "@/hooks/useConfig";
 import { fetchSession, useSession } from "@/hooks/useSession";
 import { ApiError, isAbortError } from "@/lib/api";
 import { formatCode, formatDateTime, formatRelative, formatSize } from "@/lib/format";
 import { sessionKey, sharesKey } from "@/lib/queryClient";
-import { createShare } from "@/lib/upload";
+import { discardUpload, matchFiles, type PendingUpload } from "@/lib/upload";
+import { clearPendingUpload, loadPendingUpload } from "@/lib/pendingUpload";
 import type { AppConfig, CreatedShare } from "@/lib/types";
 
 const makeSchema = (config: AppConfig) =>
@@ -53,9 +56,25 @@ function SendForm({ config, onSent }: { config: AppConfig; onSent: (share: Creat
 
     const [files, setFiles] = useState<File[]>([]);
     const [fileErrors, setFileErrors] = useState<string[]>([]);
-    const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
-    // Set while an upload is running, so it can be cancelled.
-    const [upload, setUpload] = useState<AbortController | null>(null);
+    const upload = useUpload(
+        useCallback(
+            (share: CreatedShare) => {
+                if (share.owned) queryClient.invalidateQueries({ queryKey: sharesKey });
+                onSent(share);
+            },
+            [queryClient, onSent]
+        )
+    );
+    // Once an upload has started, the form belongs to that share.
+    const busy = isSubmitting || upload.state.phase !== "idle";
+
+    const showError = (err: unknown) => {
+        if (isAbortError(err)) return;
+        const field = err instanceof ApiError ? err.data.field : undefined;
+        const message = err instanceof Error ? err.message : "Something went wrong. Please try again.";
+        if (field === "password" || field === "text") setError(field, { message });
+        else setError("root", { message });
+    };
 
     const addFiles = (incoming: File[]) => {
         const next = [...files];
@@ -82,48 +101,27 @@ function SendForm({ config, onSent }: { config: AppConfig; onSent: (share: Creat
             return;
         }
 
-        const controller = new AbortController();
-        setUpload(controller);
-        if (files.length) setProgress({ loaded: 0, total: files.reduce((sum, f) => sum + f.size, 0) });
-
         try {
             // Signed in? Make sure the session is fresh, so the share is saved
             // to the account rather than created as a guest share.
             if (user) await queryClient.fetchQuery({ queryKey: sessionKey, queryFn: fetchSession, staleTime: 0 });
 
-            const share = await createShare(
-                {
-                    text: values.text,
-                    expiresIn: values.expiresIn,
-                    maxViews: values.maxViews === "unlimited" ? null : Number(values.maxViews),
-                    password: values.password,
-                    files,
-                },
-                { signal: controller.signal, onProgress: (loaded, total) => setProgress({ loaded, total }) }
-            );
-            if (share.owned) queryClient.invalidateQueries({ queryKey: sharesKey });
-            onSent(share);
+            await upload.start({
+                text: values.text,
+                expiresIn: values.expiresIn,
+                maxViews: values.maxViews === "unlimited" ? null : Number(values.maxViews),
+                password: values.password,
+                files,
+            });
         } catch (err) {
-            if (isAbortError(err)) {
-                toast("Upload cancelled");
-            } else {
-                const field = err instanceof ApiError ? err.data.field : undefined;
-                const message = err instanceof Error ? err.message : "Something went wrong. Please try again.";
-                if (field === "password" || field === "text") setError(field, { message });
-                else setError("root", { message });
-            }
-        } finally {
-            setProgress(null);
-            setUpload(null);
+            showError(err);
         }
     });
-
-    const percent = progress && progress.total > 0 ? (progress.loaded / progress.total) * 100 : 0;
 
     return (
         <Card className="p-5 sm:p-6">
             <form onSubmit={onSubmit} noValidate>
-                <fieldset disabled={isSubmitting} className="space-y-5">
+                <fieldset disabled={busy} className="space-y-5">
                     <Field label="Message" optional error={errors.text?.message}>
                         <Textarea rows={5} placeholder="Type or paste text" {...register("text")} />
                     </Field>
@@ -134,13 +132,13 @@ function SendForm({ config, onSent }: { config: AppConfig; onSent: (share: Creat
                         </span>
                         <Dropzone
                             onFiles={addFiles}
-                            disabled={isSubmitting}
+                            disabled={busy}
                             hint={`Up to ${config.maxFiles} files, ${formatSize(config.maxFileSizeBytes)} each`}
                         />
                         {fileErrors.length > 0 && <Alert tone="warning">{fileErrors.join(" ")}</Alert>}
                         <SelectedFileList
                             files={files}
-                            disabled={isSubmitting}
+                            disabled={busy}
                             onRemove={(index) => setFiles((current) => current.filter((_, i) => i !== index))}
                         />
                     </div>
@@ -177,28 +175,23 @@ function SendForm({ config, onSent }: { config: AppConfig; onSent: (share: Creat
                     </Field>
 
                     {errors.root && <Alert tone="error">{errors.root.message}</Alert>}
-
-                    {progress && (
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between text-xs text-zinc-600 dark:text-zinc-400">
-                                <span>Uploading… {Math.round(percent)}%</span>
-                                <span className="tabular-nums">
-                                    {formatSize(progress.loaded)} / {formatSize(progress.total)}
-                                </span>
-                            </div>
-                            <Progress value={percent} label="Upload progress" />
-                        </div>
-                    )}
                 </fieldset>
 
-                <div className="mt-6 flex gap-2">
-                    <Button type="submit" size="lg" className="flex-1" loading={isSubmitting}>
-                        {!isSubmitting && <Send aria-hidden />}
-                        {isSubmitting ? "Sending…" : "Create share"}
-                    </Button>
-                    {upload && progress && (
-                        <Button size="lg" variant="secondary" onClick={() => upload.abort()}>
-                            Cancel
+                <div className="mt-6">
+                    {upload.state.phase !== "idle" && files.length > 0 ? (
+                        <UploadPanel
+                            state={upload.state}
+                            onPause={upload.pause}
+                            onResume={() => upload.resume().catch(showError)}
+                            onCancel={() => {
+                                upload.cancel();
+                                toast("Upload cancelled");
+                            }}
+                        />
+                    ) : (
+                        <Button type="submit" size="lg" className="w-full" loading={isSubmitting}>
+                            {!isSubmitting && <Send aria-hidden />}
+                            {isSubmitting ? "Sending…" : "Create share"}
                         </Button>
                     )}
                 </div>
@@ -336,15 +329,136 @@ function SendResult({ share, onReset }: { share: CreatedShare; onReset: () => vo
     );
 }
 
+// An upload this browser started earlier and didn't finish (closed tab,
+// lost connection). The browser can't reopen files by itself, so the user
+// picks the same files again; only what the server doesn't have is sent.
+function ResumeUploadCard({
+    pending,
+    onDone,
+    onDiscarded,
+}: {
+    pending: PendingUpload;
+    onDone: (share: CreatedShare) => void;
+    onDiscarded: () => void;
+}) {
+    const upload = useUpload(onDone);
+    const input = useRef<HTMLInputElement>(null);
+    const [error, setError] = useState<string | null>(null);
+    const total = pending.files.reduce((sum, f) => sum + f.size, 0);
+
+    // Errors that end the upload for good (e.g. it expired): back to the form.
+    const giveUp = (err: unknown) => {
+        if (isAbortError(err)) return;
+        toast.error(err instanceof Error ? err.message : "This upload can't be resumed.");
+        onDiscarded();
+    };
+
+    const choose = (chosen: File[]) => {
+        const match = matchFiles(pending, chosen);
+        if ("missing" in match) {
+            setError(`Choose the same files you started with. Missing: ${match.missing.join(", ")}.`);
+            return;
+        }
+        setError(null);
+        upload.resume({ pending, files: match.files }).catch(giveUp);
+    };
+
+    const discard = () => {
+        if (upload.state.phase !== "idle") upload.cancel();
+        else {
+            discardUpload(pending);
+            clearPendingUpload();
+        }
+        toast("Upload discarded");
+        onDiscarded();
+    };
+
+    return (
+        <Card className="animate-fade-in p-5 sm:p-6">
+            <title>Finish your upload · sendRetrieve</title>
+            <div className="flex items-start gap-3">
+                <UploadCloud className="mt-0.5 size-6 shrink-0 text-indigo-500" aria-hidden />
+                <div className="min-w-0">
+                    <h2 className="text-lg font-semibold">Finish your upload</h2>
+                    <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400">
+                        Share {formatCode(pending.code)} · started {formatRelative(pending.startedAt)} ·{" "}
+                        {formatSize(total)}
+                    </p>
+                </div>
+            </div>
+
+            <ul className="mt-4 space-y-1.5" aria-label="Files in this upload">
+                {pending.files.map((f) => (
+                    <li key={`${f.name}-${f.size}`} className="flex items-center gap-2.5 text-sm">
+                        <FileIcon mimeType={f.type} />
+                        <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                        <span className="shrink-0 text-xs text-zinc-500 tabular-nums">{formatSize(f.size)}</span>
+                    </li>
+                ))}
+            </ul>
+
+            <div className="mt-5">
+                {upload.state.phase === "idle" ? (
+                    <div className="space-y-3">
+                        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                            Choose the same files again to pick up where the upload stopped. What's already uploaded
+                            isn't sent twice.
+                        </p>
+                        {error && <Alert tone="error">{error}</Alert>}
+                        <input
+                            ref={input}
+                            type="file"
+                            multiple
+                            hidden
+                            aria-label="Choose the same files"
+                            onChange={(e) => {
+                                choose(Array.from(e.target.files ?? []));
+                                e.target.value = "";
+                            }}
+                        />
+                        <div className="flex gap-2">
+                            <Button size="lg" className="flex-1" onClick={() => input.current?.click()}>
+                                <FolderOpen aria-hidden />
+                                Choose files
+                            </Button>
+                            <Button size="lg" variant="ghost" onClick={discard}>
+                                Discard
+                            </Button>
+                        </div>
+                    </div>
+                ) : (
+                    <UploadPanel
+                        state={upload.state}
+                        onPause={upload.pause}
+                        onResume={() => upload.resume().catch(giveUp)}
+                        onCancel={discard}
+                    />
+                )}
+            </div>
+        </Card>
+    );
+}
+
 export default function SendPage() {
     const { data: config, error } = useConfig();
     const [result, setResult] = useState<CreatedShare | null>(null);
+    // An unfinished upload from an earlier visit, if any.
+    const [pending, setPending] = useState(loadPendingUpload);
 
     if (error) return <Alert tone="error">Couldn't load the app's settings. Refresh to try again.</Alert>;
     if (!config) return <PageSpinner />;
-    return result ? (
-        <SendResult share={result} onReset={() => setResult(null)} />
-    ) : (
-        <SendForm config={config} onSent={setResult} />
-    );
+    if (result) return <SendResult share={result} onReset={() => setResult(null)} />;
+    if (pending) {
+        return (
+            <ResumeUploadCard
+                pending={pending}
+                onDone={(share) => {
+                    setPending(null);
+                    setResult(share);
+                }}
+                onDiscarded={() => setPending(null)}
+            />
+        );
+    }
+    return <SendForm config={config} onSent={setResult} />;
 }

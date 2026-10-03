@@ -29,6 +29,10 @@ const liveFilter = () => ({
 const fileKeys = (shares) =>
     shares.flatMap((s) => s.files.flatMap((f) => (f.thumbnailKey ? [f.storedName, f.thumbnailKey] : [f.storedName])));
 
+// Multipart uploads still in progress for these shares: [{ key, uploadId }].
+const pendingUploads = (shares) =>
+    shares.flatMap((s) => s.files.filter((f) => f.upload?.uploadId).map((f) => ({ key: f.storedName, uploadId: f.upload.uploadId })));
+
 const serializeFile = (code, file) => {
     const token = createDownloadToken({ code, fileId: file._id });
     const downloadUrl = `/api/files/${token}`;
@@ -144,16 +148,21 @@ const endShares = async (shares, reason) => {
 };
 
 // Throws away shares whose upload never finished (or was refused): the
-// record goes now, the cleanup worker deletes whatever was uploaded.
+// record goes now, the cleanup worker deletes whatever was uploaded and
+// aborts uploads still in progress.
 const discardShares = async (shares) => {
     if (shares.length === 0) return;
     await Share.deleteMany({ _id: { $in: shares.map((s) => s._id) } });
     const keys = fileKeys(shares);
-    if (keys.length) await publish("share.discarded", { shareIds: shares.map((s) => String(s._id)), keys });
+    const uploads = pendingUploads(shares);
+    if (keys.length || uploads.length) {
+        await publish("share.discarded", { shareIds: shares.map((s) => String(s._id)), keys, uploads });
+    }
 };
 
 module.exports = {
     fileKeys,
+    pendingUploads,
     NOT_FOUND_MESSAGE,
     PREVIEWABLE_TYPES,
     liveFilter,

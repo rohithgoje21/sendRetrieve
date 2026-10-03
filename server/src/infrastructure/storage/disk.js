@@ -1,5 +1,7 @@
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const { once } = require("events");
 const { pipeline } = require("stream/promises");
 const { Transform } = require("stream");
 const config = require("../../config");
@@ -28,6 +30,43 @@ const ignoreMissing = (err) => {
     if (err.code !== "ENOENT") throw err;
 };
 
+// Multipart uploads keep their parts in .multipart/<uploadId>/<partNumber>
+// until they're joined into the file.
+const multipartRoot = path.join(root, ".multipart");
+const partsDir = (uploadId) => {
+    if (!/^[0-9a-f]{32}$/.test(uploadId)) throw new Error("Invalid upload ID");
+    return path.join(multipartRoot, uploadId);
+};
+const exists = (p) =>
+    fs.promises.access(p).then(
+        () => true,
+        () => false
+    );
+
+// Streams `source` to `target`, refusing anything but exactly `size` bytes.
+// Written to a temp file first, so a failed upload leaves nothing.
+const receiveExactly = async (source, target, size) => {
+    const temp = `${target}.${process.pid}.${Date.now()}.part`;
+    let received = 0;
+    const counter = new Transform({
+        transform(chunk, encoding, callback) {
+            received += chunk.length;
+            if (received > size) callback(new HttpError(413, "The upload is larger than the file announced"));
+            else callback(null, chunk);
+        },
+    });
+    try {
+        await pipeline(source, counter, fs.createWriteStream(temp));
+        if (received !== size) {
+            throw new HttpError(400, `Expected ${size} bytes but received ${received}`);
+        }
+        await fs.promises.rename(temp, target);
+    } catch (err) {
+        await fs.promises.rm(temp, { force: true });
+        throw err;
+    }
+};
+
 const createDiskStorage = () => ({
     driver: "disk",
     // Files are served by this server, so no extra origin for the CSP.
@@ -49,32 +88,89 @@ const createDiskStorage = () => ({
         };
     },
 
-    // Streams a request body to `key`, refusing anything but exactly `size`
-    // bytes. Written to a temp file first, so a failed upload leaves nothing.
-    async receiveUpload(req, { key, size }) {
+    // Behind PUT /api/uploads/:token: a whole file, or one part of a
+    // multipart upload (when the token names an upload ID).
+    async receiveUpload(req, { key, size, uploadId, partNumber }) {
+        if (uploadId) {
+            const dir = partsDir(uploadId);
+            if (!(await exists(dir))) throw new HttpError(404, "This upload no longer exists.");
+            return receiveExactly(req, path.join(dir, String(partNumber)), size);
+        }
+        const target = pathFor(key);
+        await fs.promises.mkdir(path.dirname(target), { recursive: true });
+        return receiveExactly(req, target, size);
+    },
+
+    // ---- Multipart (resumable) uploads, same interface as the S3 driver ----
+
+    async createMultipartUpload({ key }) {
+        pathFor(key); // validate
+        const uploadId = crypto.randomBytes(16).toString("hex");
+        await fs.promises.mkdir(partsDir(uploadId), { recursive: true });
+        return uploadId;
+    },
+
+    async signUploadPart({ key, uploadId, partNumber, size }) {
+        const token = createUploadToken({ key, size, uploadId, partNumber }, config.uploads.partUrlSeconds);
+        return { method: "PUT", url: `/api/uploads/${token}`, headers: {} };
+    },
+
+    async listUploadedParts({ uploadId }) {
+        let names;
+        try {
+            names = await fs.promises.readdir(partsDir(uploadId));
+        } catch (err) {
+            ignoreMissing(err);
+            return null;
+        }
+        const parts = [];
+        for (const name of names.filter((n) => /^\d+$/.test(n))) {
+            const stats = await fs.promises.stat(path.join(partsDir(uploadId), name)).catch(() => null);
+            if (stats) parts.push({ partNumber: Number(name), size: stats.size, etag: null });
+        }
+        return parts.sort((a, b) => a.partNumber - b.partNumber);
+    },
+
+    // Joins the parts, in order, into the file.
+    async completeMultipartUpload({ key, uploadId, parts }) {
         const target = pathFor(key);
         const temp = `${target}.${process.pid}.${Date.now()}.part`;
         await fs.promises.mkdir(path.dirname(target), { recursive: true });
-
-        let received = 0;
-        const counter = new Transform({
-            transform(chunk, encoding, callback) {
-                received += chunk.length;
-                if (received > size) callback(new HttpError(413, "The upload is larger than the file announced"));
-                else callback(null, chunk);
-            },
-        });
-
+        const out = fs.createWriteStream(temp);
         try {
-            await pipeline(req, counter, fs.createWriteStream(temp));
-            if (received !== size) {
-                throw new HttpError(400, `Expected ${size} bytes but received ${received}`);
+            for (const { partNumber } of [...parts].sort((a, b) => a.partNumber - b.partNumber)) {
+                for await (const chunk of fs.createReadStream(path.join(partsDir(uploadId), String(partNumber)))) {
+                    if (!out.write(chunk)) await once(out, "drain");
+                }
             }
+            await new Promise((resolve, reject) => out.end((err) => (err ? reject(err) : resolve())));
             await fs.promises.rename(temp, target);
         } catch (err) {
+            out.destroy();
             await fs.promises.rm(temp, { force: true });
             throw err;
         }
+        await fs.promises.rm(partsDir(uploadId), { recursive: true, force: true });
+    },
+
+    async abortMultipartUpload({ uploadId }) {
+        await fs.promises.rm(partsDir(uploadId), { recursive: true, force: true });
+    },
+
+    // Multipart uploads nothing has touched for `olderThanMs` (their share
+    // was lost without aborting them). S3 does this with a lifecycle rule.
+    async abortStaleUploads(olderThanMs) {
+        const cutoff = Date.now() - olderThanMs;
+        const ids = await fs.promises.readdir(multipartRoot).catch(() => []);
+        let removed = 0;
+        for (const id of ids) {
+            const stats = await fs.promises.stat(path.join(multipartRoot, id)).catch(() => null);
+            if (stats && stats.mtimeMs < cutoff) {
+                await fs.promises.rm(path.join(multipartRoot, id), { recursive: true, force: true });
+                removed++;
+            }
+        }
+        return removed;
     },
 
     async stat(key) {
@@ -132,12 +228,13 @@ const createDiskStorage = () => ({
         await Promise.all([...dirs].map((dir) => fs.promises.rmdir(dir).catch(() => {})));
     },
 
-    // Every stored file, for the orphan sweep.
+    // Every stored file, for the orphan sweep (not parts of uploads in progress).
     async *list() {
         const entries = await fs.promises.readdir(root, { recursive: true, withFileTypes: true });
         for (const entry of entries) {
             if (!entry.isFile() || entry.name.endsWith(".part")) continue;
             const full = path.join(entry.parentPath ?? entry.path, entry.name);
+            if (full.startsWith(multipartRoot + path.sep)) continue;
             const stats = await fs.promises.stat(full).catch(() => null);
             if (stats) yield { key: path.relative(root, full).split(path.sep).join("/"), modifiedAt: stats.mtime };
         }

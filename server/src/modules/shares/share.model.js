@@ -10,6 +10,12 @@ const fileSchema = new mongoose.Schema({
     // until then, what the browser reported.
     mimeType: { type: String, default: "application/octet-stream" },
     downloads: { type: Number, default: 0 },
+    // While a big file is being uploaded in parts (multipart): the storage
+    // upload's ID and the part size. Cleared once the file is complete.
+    upload: {
+        type: new mongoose.Schema({ uploadId: String, partSize: Number }, { _id: false }),
+        default: null,
+    },
     // Malware scan by the processing worker: pending -> clean | infected,
     // or "skipped" when no scanner is configured.
     scanStatus: { type: String, enum: ["pending", "clean", "infected", "skipped"], default: "pending" },

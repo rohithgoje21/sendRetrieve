@@ -2,13 +2,15 @@ const Share = require("../modules/shares/share.model");
 const { storage } = require("../infrastructure/storage");
 
 // sr.cleanup: deletes a share's files from storage once it has ended (or its
-// upload was abandoned), then finishes the share's lifecycle:
+// upload was abandoned, in which case multipart uploads still in progress are
+// aborted too), then finishes the share's lifecycle:
 //   owned share   filesState -> "deleted" (kept in the owner's history)
 //   guest share   record removed
 // Deleting is idempotent, so a redelivered or replayed message is harmless.
 // If storage is down, the job fails and the queue retries it with backoff.
 const handle = async (message, { log }) => {
-    const { keys = [], shareId } = message.data;
+    const { keys = [], uploads = [], shareId } = message.data;
+    for (const upload of uploads) await storage.abortMultipartUpload(upload);
     if (keys.length) await storage.delete(keys);
 
     if (message.type === "share.ended" && shareId) {

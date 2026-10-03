@@ -8,6 +8,8 @@ process.env.UPLOAD_DIR = process.env.UPLOAD_DIR || fs.mkdtempSync(path.join(os.t
 process.env.TOKEN_SECRET = "test-secret";
 // Quick retries, so tests of failing jobs don't wait 36 seconds.
 process.env.QUEUE_RETRY_DELAYS_MS = process.env.QUEUE_RETRY_DELAYS_MS || "10,20,30";
+// Small parts (64 KB), so tests exercise multipart uploads with small files.
+process.env.UPLOAD_PART_SIZE_MB = process.env.UPLOAD_PART_SIZE_MB || String(64 / 1024);
 
 // A stand-in for the React build (client/dist), so the server tests don't
 // depend on the frontend having been built.
@@ -60,8 +62,26 @@ const uploadTo = async (client, target, content) => {
     return (await client.put(target.url).set(target.headers).serialize((body) => body).send(content)).status;
 };
 
+// Uploads parts of a big file the way the browser does: asks for signed part
+// URLs (in batches), then PUTs each slice. `partNumbers` defaults to all.
+const uploadInParts = async (client, { code, manageToken }, target, content, partNumbers = null) => {
+    const { partSize, partCount } = target.multipart;
+    const wanted = partNumbers ?? Array.from({ length: partCount }, (_, i) => i + 1);
+    for (let i = 0; i < wanted.length; i += 50) {
+        const res = await client
+            .post(`/api/shares/${code}/uploads/${target.fileId}/parts`)
+            .send({ manageToken, partNumbers: wanted.slice(i, i + 50) });
+        if (res.status !== 200) throw new Error(`Part URLs failed with ${res.status}: ${JSON.stringify(res.body)}`);
+        for (const part of res.body.parts) {
+            const start = (part.partNumber - 1) * partSize;
+            const status = await uploadTo(client, part, content.subarray(start, start + partSize));
+            if (status !== 200) throw new Error(`Part ${part.partNumber} failed with ${status}`);
+        }
+    }
+};
+
 // Creates a share the way the browser does: announce it with file details,
-// upload each file to its upload URL, then complete it.
+// upload each file to its upload URL (big files in parts), then complete it.
 //   target   an Express app or a supertest agent (to send its cookies)
 //   files    [{ name, content (string or Buffer), type? }]
 //   options  { upload: false } stops after creating; { complete: false } after uploading
@@ -79,6 +99,10 @@ const createShare = async (target, fields = {}, files = [], { upload = true, com
     if (created.status !== 201 || files.length === 0 || !upload) return result(created);
 
     for (const [i, uploadTarget] of created.body.uploads.entries()) {
+        if (uploadTarget.multipart) {
+            await uploadInParts(client, created.body, uploadTarget, contents[i]);
+            continue;
+        }
         const status = await uploadTo(client, uploadTarget, contents[i]);
         if (status !== 200) throw new Error(`Upload of ${files[i].name} failed with ${status}`);
     }
@@ -112,4 +136,4 @@ const useTestDatabase = () => {
     });
 };
 
-module.exports = { app, uploadDir, storedFiles, createShare, uploadTo, typeFor, PNG, settle, useTestDatabase };
+module.exports = { app, uploadDir, storedFiles, createShare, uploadTo, uploadInParts, typeFor, PNG, settle, useTestDatabase };

@@ -129,8 +129,25 @@ const config = {
     downloadWindowSeconds: 10 * 60,
 
     // How long a browser has to upload a new share's files before the share is
-    // abandoned and cleaned up.
+    // abandoned and cleaned up. Upload activity (resuming, fetching part URLs)
+    // keeps pushing the deadline out, up to maxUploadWindowSeconds after the
+    // share was created.
     uploadWindowSeconds: 60 * 60,
+    maxUploadWindowSeconds: 24 * HOUR,
+
+    uploads: {
+        // Files bigger than this are uploaded in parts of this size (S3
+        // multipart): each part is retried on its own, and an interrupted
+        // upload picks up where it stopped. S3 requires at least 5 MB.
+        partSize: Math.max(
+            Math.round(Number(process.env.UPLOAD_PART_SIZE_MB || 8) * MB),
+            storageDriver === "s3" ? 5 * MB : 1
+        ),
+        // Signed part URLs are short-lived; the browser asks for more as it goes.
+        partUrlSeconds: 15 * 60,
+        // Most part URLs handed out per request.
+        maxPartsPerRequest: 50,
+    },
 
     // Refuse executables (Windows, Linux, macOS binaries), detected from the
     // file's contents rather than its name.

@@ -66,7 +66,13 @@ describe("uploading files", () => {
         expect(res.status).toBe(201);
         expect(res.body.status).toBe("uploading");
         expect(res.body.uploads).toEqual([
-            { fileId: expect.any(String), method: "PUT", url: expect.stringMatching(/^\/api\/uploads\//), headers: { "Content-Type": "text/plain" } },
+            {
+                fileId: expect.any(String),
+                multipart: null,
+                method: "PUT",
+                url: expect.stringMatching(/^\/api\/uploads\//),
+                headers: { "Content-Type": "text/plain" },
+            },
         ]);
         await openShare(code).expect(404);
     });
@@ -94,6 +100,14 @@ describe("uploading files", () => {
         const done = await request(app).post(`/api/shares/${code}/complete`).send({ manageToken }).expect(200);
         expect(done.body.status).toBe("ready");
         expect((await openShare(code).expect(200)).body.files.map((f) => f.name)).toEqual(["a.txt", "b.txt"]);
+    });
+
+    test("completing again (a retry after a lost response) gets the same answer", async () => {
+        const { code, manageToken, body } = await share({}, [{ name: "a.txt", content: "aaa" }]);
+        const again = await request(app).post(`/api/shares/${code}/complete`).send({ manageToken }).expect(200);
+        expect(again.body).toEqual({ ...body, url: expect.stringMatching(new RegExp(`/s/${code}$`)) });
+        // ...but only with the manage token.
+        await request(app).post(`/api/shares/${code}/complete`).send({ manageToken: "wrong" }).expect(404);
     });
 
     test("the upload endpoint takes exactly the announced size", async () => {
@@ -142,11 +156,6 @@ describe("uploading files", () => {
         await settle(); // the cleanup worker deletes the files
         expect(storedFiles()).toHaveLength(0);
         expect(await Share.countDocuments()).toBe(0);
-    });
-
-    test("a share can't be completed twice", async () => {
-        const { code, manageToken } = await share({}, [{ name: "a.txt", content: "a" }]);
-        await request(app).post(`/api/shares/${code}/complete`).send({ manageToken }).expect(404);
     });
 
     test("the expiry clock starts when the upload completes", async () => {

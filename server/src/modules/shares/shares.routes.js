@@ -69,6 +69,86 @@ const logCreated = (req, share) =>
         "Share created"
     );
 
+// ---- Multipart (resumable) uploads ----
+// Files bigger than the part size are uploaded in parts, each to its own
+// signed URL, so a failed part is retried alone and an interrupted upload
+// resumes where it stopped. Storage keeps track of which parts arrived.
+
+// S3 allows at most 10,000 parts per upload.
+const MAX_PARTS = 10_000;
+const MB = 1024 * 1024;
+// The configured part size, or bigger (whole MB) for a file so huge it
+// would need more parts than that.
+const partSizeFor = (size) => {
+    const needed = Math.ceil(size / MAX_PARTS);
+    return needed <= config.uploads.partSize ? config.uploads.partSize : Math.ceil(needed / MB) * MB;
+};
+const partCount = (file) => Math.max(1, Math.ceil(file.size / file.upload.partSize));
+const partSizeOf = (file, partNumber) => {
+    const count = partCount(file);
+    return partNumber < count ? file.upload.partSize : file.size - file.upload.partSize * (count - 1);
+};
+
+// The parts storage holds for `file` that are complete (the right size), or
+// null if the storage upload no longer exists.
+const receivedParts = async (file) => {
+    const parts = await storage.listUploadedParts({ key: file.storedName, uploadId: file.upload.uploadId });
+    if (!parts) return null;
+    const count = partCount(file);
+    return parts.filter((p) => p.partNumber <= count && p.size === partSizeOf(file, p.partNumber));
+};
+
+// What the browser needs to upload a file: a signed URL for the whole file,
+// or, for a big one, the part layout (part URLs come from .../parts).
+const uploadTarget = async (file) =>
+    file.upload
+        ? { fileId: file._id, multipart: { partSize: file.upload.partSize, partCount: partCount(file) } }
+        : {
+              fileId: file._id,
+              multipart: null,
+              ...(await storage.createUploadTarget({ key: file.storedName, size: file.size, contentType: file.mimeType })),
+          };
+
+// Upload activity pushes a pending share's deadline out (to an hour from
+// now), up to a maximum after the share was created. Returns the deadline.
+const extendUploadDeadline = async (share) => {
+    const deadline = new Date(
+        Math.min(
+            Date.now() + config.uploadWindowSeconds * 1000,
+            share.createdAt.getTime() + config.maxUploadWindowSeconds * 1000
+        )
+    );
+    if (deadline <= share.expiresAt) return share.expiresAt;
+    await Share.updateOne(
+        { _id: share._id, uploadPending: true },
+        { $set: { expiresAt: deadline, ...(share.ownerId ? {} : { purgeAt: new Date(deadline.getTime() + GUEST_PURGE_DELAY_MS) }) } }
+    );
+    return deadline;
+};
+
+// Joins the parts of each multipart file into the stored file. Throws 409
+// (with the missing part numbers) if a file isn't fully uploaded yet.
+const finishMultipartUploads = async (share) => {
+    for (const file of share.files.filter((f) => f.upload)) {
+        const parts = await receivedParts(file);
+        if (!parts) {
+            // Already joined by an earlier /complete that didn't get to finish.
+            if ((await storage.stat(file.storedName))?.size === file.size) continue;
+            throw new HttpError(409, `"${file.originalName}" has to be uploaded again.`, { fileId: file._id });
+        }
+        const received = new Set(parts.map((p) => p.partNumber));
+        const missingParts = [];
+        for (let n = 1; n <= partCount(file); n++) if (!received.has(n)) missingParts.push(n);
+        if (missingParts.length) {
+            throw new HttpError(409, `"${file.originalName}" hasn't finished uploading.`, {
+                fileId: file._id,
+                missingParts: missingParts.slice(0, 100),
+            });
+        }
+        await storage.completeMultipartUpload({ key: file.storedName, uploadId: file.upload.uploadId, parts });
+    }
+};
+
 // A share whose upload is still in progress, if `manageToken` is its token.
 const findPendingShare = async (code, manageToken) => {
     const normalized = normalizeCode(code);
@@ -167,16 +247,23 @@ const createSharesRouter = (ctx) => {
             }
 
             const shareId = new mongoose.Types.ObjectId();
-            const fileDocs = files.map((f) => {
-                const fileId = new mongoose.Types.ObjectId();
-                return {
-                    _id: fileId,
-                    originalName: cleanFileName(f.name),
-                    storedName: storageKey(shareId, fileId),
-                    size: f.size,
-                    mimeType: cleanContentType(f.type),
-                };
-            });
+            const fileDocs = await Promise.all(
+                files.map(async (f) => {
+                    const fileId = new mongoose.Types.ObjectId();
+                    const doc = {
+                        _id: fileId,
+                        originalName: cleanFileName(f.name),
+                        storedName: storageKey(shareId, fileId),
+                        size: f.size,
+                        mimeType: cleanContentType(f.type),
+                    };
+                    if (f.size > config.uploads.partSize) {
+                        const uploadId = await storage.createMultipartUpload({ key: doc.storedName, contentType: doc.mimeType });
+                        doc.upload = { uploadId, partSize: partSizeFor(f.size) };
+                    }
+                    return doc;
+                })
+            );
 
             const durationSeconds = config.expiryOptions[expiresIn];
             const pending = fileDocs.length > 0;
@@ -200,12 +287,7 @@ const createSharesRouter = (ctx) => {
                 purgeAt: req.user ? null : new Date(expiresAt.getTime() + GUEST_PURGE_DELAY_MS),
             });
 
-            const uploads = await Promise.all(
-                share.files.map(async (f) => ({
-                    fileId: f._id,
-                    ...(await storage.createUploadTarget({ key: f.storedName, size: f.size, contentType: f.mimeType })),
-                }))
-            );
+            const uploads = await Promise.all(share.files.map(uploadTarget));
 
             if (!pending) {
                 logCreated(req, share);
@@ -228,7 +310,15 @@ const createSharesRouter = (ctx) => {
         limiter(ctx, { name: "complete-share", limit: 60, error: "Too many requests. Please wait a few minutes." }),
         validateBody(schemas.manageShare),
         async (req, res) => {
+            // Already completed: a retry after the response got lost. Same answer.
+            const code = normalizeCode(req.params.code);
+            const existing = code && (await Share.findOne({ code, uploadPending: false, endedAt: null }));
+            if (existing && manageTokenMatches(existing, req.body.manageToken)) {
+                return res.json({ ...shareSummary(req, existing), status: existing.processing ? "processing" : "ready" });
+            }
+
             const share = await findPendingShare(req.params.code, req.body.manageToken);
+            await finishMultipartUploads(share);
             const files = await verifyUploadedFiles(share);
 
             // With a scanner, the share waits ("processing") until the processing
@@ -241,7 +331,7 @@ const createSharesRouter = (ctx) => {
                     $set: {
                         uploadPending: false,
                         processing: scanning,
-                        files: files.map((f) => ({ ...f, scanStatus: scanning ? "pending" : "skipped" })),
+                        files: files.map((f) => ({ ...f, upload: null, scanStatus: scanning ? "pending" : "skipped" })),
                         expiresAt,
                         purgeAt: share.ownerId ? null : new Date(expiresAt.getTime() + GUEST_PURGE_DELAY_MS),
                     },
@@ -254,6 +344,78 @@ const createSharesRouter = (ctx) => {
             await publish("share.uploaded", { shareId: String(completed._id), code: completed.code, scan: scanning });
             if (!scanning) notifyShare(completed, "share:created");
             res.json({ ...shareSummary(req, completed), status: scanning ? "processing" : "ready" });
+        }
+    );
+
+    // Step 2b, for big files: signed URLs for some of a file's parts. The
+    // browser asks for more as it goes (they're short-lived).
+    router.post(
+        "/shares/:code/uploads/:fileId/parts",
+        limiter(ctx, { name: "upload-parts", limit: 600, error: "Too many requests. Please wait a few minutes." }),
+        validateBody(schemas.uploadParts),
+        async (req, res) => {
+            const share = await findPendingShare(req.params.code, req.body.manageToken);
+            const file = mongoose.isValidObjectId(req.params.fileId) ? share.files.id(req.params.fileId) : null;
+            if (!file?.upload) throw new HttpError(404, "There's no upload in parts for this file.");
+            const count = partCount(file);
+            if (req.body.partNumbers.some((n) => n > count)) {
+                throw new HttpError(400, `This file has ${count} part${count === 1 ? "" : "s"}.`, { field: "partNumbers" });
+            }
+
+            const uploadExpiresAt = await extendUploadDeadline(share);
+            const parts = await Promise.all(
+                req.body.partNumbers.map(async (partNumber) => ({
+                    partNumber,
+                    ...(await storage.signUploadPart({
+                        key: file.storedName,
+                        uploadId: file.upload.uploadId,
+                        partNumber,
+                        size: partSizeOf(file, partNumber),
+                    })),
+                }))
+            );
+            res.json({ parts, uploadExpiresAt });
+        }
+    );
+
+    // Picking up an interrupted upload (lost connection, closed tab): what's
+    // already stored, and fresh upload URLs for what isn't.
+    router.post(
+        "/shares/:code/resume",
+        limiter(ctx, { name: "resume-upload", limit: 120, error: "Too many requests. Please wait a few minutes." }),
+        validateBody(schemas.manageShare),
+        async (req, res) => {
+            const share = await findPendingShare(req.params.code, req.body.manageToken);
+            const uploadExpiresAt = await extendUploadDeadline(share);
+
+            const files = await Promise.all(
+                share.files.map(async (file) => {
+                    const about = { name: file.originalName, size: file.size };
+                    if (!file.upload) {
+                        const uploaded = (await storage.stat(file.storedName))?.size === file.size;
+                        return { ...(uploaded ? { fileId: file._id, multipart: null } : await uploadTarget(file)), ...about, uploaded };
+                    }
+
+                    let parts = await receivedParts(file);
+                    if (!parts) {
+                        // The storage upload is gone (e.g. cleaned up): start this file over.
+                        const uploadId = await storage.createMultipartUpload({ key: file.storedName, contentType: file.mimeType });
+                        await Share.updateOne({ _id: share._id, "files._id": file._id }, { $set: { "files.$.upload.uploadId": uploadId } });
+                        file.upload.uploadId = uploadId;
+                        parts = [];
+                    }
+                    const target = await uploadTarget(file);
+                    return {
+                        ...target,
+                        ...about,
+                        uploaded: parts.length === partCount(file),
+                        multipart: { ...target.multipart, uploadedParts: parts.map((p) => p.partNumber) },
+                    };
+                })
+            );
+
+            res.set("Cache-Control", "no-store");
+            res.json({ code: share.code, status: "uploading", uploadExpiresAt, files });
         }
     );
 

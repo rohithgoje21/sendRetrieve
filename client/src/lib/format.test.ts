@@ -1,4 +1,4 @@
-import { formatCode, formatRelative, formatSize, normalizeCodeInput, pluralize, stripCode } from "./format";
+import { formatCode, formatRelative, formatSize, formatTimeLeft, normalizeCodeInput, pluralize, stripCode } from "./format";
 
 describe("formatSize", () => {
     test.each([
@@ -42,6 +42,14 @@ describe("formatRelative", () => {
     ])("%s -> %s", (iso, expected) => {
         expect(formatRelative(iso, now)).toBe(expected);
     });
+});
+
+test("formatTimeLeft", () => {
+    expect(formatTimeLeft(4)).toBe("a few seconds left");
+    expect(formatTimeLeft(34)).toBe("about 30 s left");
+    expect(formatTimeLeft(150)).toBe("about 3 min left");
+    expect(formatTimeLeft(3600)).toBe("about 1 h left");
+    expect(formatTimeLeft(2 * 3600 + 5 * 60)).toBe("about 2 h 5 min left");
 });
 
 test("pluralize", () => {
