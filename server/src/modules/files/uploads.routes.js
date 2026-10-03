@@ -1,7 +1,7 @@
 const express = require("express");
-const { verifyUploadToken } = require("../lib/tokens");
-const { HttpError } = require("../lib/errors");
-const { limiter } = require("../lib/rateLimit");
+const { verifyUploadToken } = require("./linkTokens");
+const { HttpError } = require("../../shared/errors");
+const { limiter } = require("../../shared/rateLimit");
 
 // PUT /api/uploads/:token: the disk driver's stand-in for a signed S3 upload
 // URL. The token (from POST /api/shares) names the file's storage key and

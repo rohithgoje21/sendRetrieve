@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const pinoHttp = require("pino-http");
-const { logger: defaultLogger } = require("./logger");
+const { logger: defaultLogger } = require("../infrastructure/logger");
 
 // URLs carry secrets: share codes, download tokens, reset tokens (?token=).
 // Log the route's shape instead of the value, and drop query strings.

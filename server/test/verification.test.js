@@ -1,7 +1,7 @@
 const { app, useTestDatabase } = require("./helpers");
 const request = require("supertest");
-const User = require("../src/models/User");
-const mailer = require("../src/lib/mailer");
+const User = require("../src/modules/users/user.model");
+const mailer = require("../src/infrastructure/mailer");
 
 useTestDatabase();
 

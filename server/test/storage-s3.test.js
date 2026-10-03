@@ -21,9 +21,9 @@ if (TEST_S3_ENDPOINT) {
 
 const { app, createShare, PNG, useTestDatabase } = require("./helpers");
 const request = require("supertest");
-const Share = require("../src/models/Share");
-const { storage } = require("../src/lib/storage");
-const { deleteExpiredShares, deleteOrphanFiles } = require("../src/lib/cleanup");
+const Share = require("../src/modules/shares/share.model");
+const { storage } = require("../src/infrastructure/storage");
+const { deleteExpiredShares, deleteOrphanFiles } = require("../src/workers/cleanup");
 
 const bucketKeys = async () => {
     const keys = [];

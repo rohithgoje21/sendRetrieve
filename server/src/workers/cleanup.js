@@ -1,7 +1,7 @@
-const Share = require("../models/Share");
-const { storage } = require("./storage");
-const { endShares, discardShares } = require("./shares");
-const log = require("./logger").logger.child({ component: "cleanup" });
+const Share = require("../modules/shares/share.model");
+const { storage } = require("../infrastructure/storage");
+const { endShares, discardShares } = require("../modules/shares/shares.service");
+const log = require("../infrastructure/logger").logger.child({ component: "cleanup" });
 
 // Files younger than this may belong to an upload that hasn't been recorded
 // yet, so the orphan sweep leaves them alone.

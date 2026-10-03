@@ -7,7 +7,7 @@
 
 const mongoose = require("mongoose");
 const config = require("../src/config");
-const User = require("../src/models/User");
+const User = require("../src/modules/users/user.model");
 
 const [email, role] = process.argv.slice(2);
 

@@ -1,10 +1,11 @@
 const { Server } = require("socket.io");
 const { createAdapter } = require("@socket.io/redis-adapter");
-const config = require("./config");
-const Share = require("./models/Share");
-const { normalizeCode } = require("./lib/codes");
-const { verifyRealtimeToken, manageTokenMatches } = require("./lib/auth");
-const { logger } = require("./lib/logger");
+const config = require("../../config");
+const Share = require("../shares/share.model");
+const { normalizeCode } = require("../shares/codes");
+const { verifyRealtimeToken } = require("./realtimeTokens");
+const { manageTokenMatches } = require("../shares/manageToken");
+const { logger } = require("../../infrastructure/logger");
 
 // Live updates over Socket.IO: tells a share's owner (and whoever holds its
 // manage token, such as a guest sender's browser) when the share is opened,

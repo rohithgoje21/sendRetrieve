@@ -1,6 +1,6 @@
 const { rateLimit } = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
-const { logger } = require("./logger");
+const { logger } = require("../infrastructure/logger");
 
 const storeLogger = logger.child({ component: "rate-limit" });
 

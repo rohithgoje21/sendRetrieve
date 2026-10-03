@@ -2,11 +2,11 @@ const { Writable } = require("stream");
 const { app, createShare, useTestDatabase } = require("./helpers");
 const request = require("supertest");
 const config = require("../src/config");
-const Share = require("../src/models/Share");
+const Share = require("../src/modules/shares/share.model");
 const { createApp } = require("../src/app");
-const { createLogger } = require("../src/lib/logger");
-const { connectRedis } = require("../src/lib/redis");
-const { redactPath } = require("../src/lib/requestLogging");
+const { createLogger } = require("../src/infrastructure/logger");
+const { connectRedis } = require("../src/infrastructure/redis");
+const { redactPath } = require("../src/shared/requestLogging");
 
 useTestDatabase();
 

@@ -4,8 +4,8 @@ const request = require("supertest");
 const { Server } = require("socket.io");
 const { createAdapter } = require("@socket.io/redis-adapter");
 const { io: connectClient } = require("socket.io-client");
-const { initRealtime, closeRealtime, notifyShare } = require("../src/realtime");
-const { connectRedis } = require("../src/lib/redis");
+const { initRealtime, closeRealtime, notifyShare } = require("../src/modules/realtime/realtime");
+const { connectRedis } = require("../src/infrastructure/redis");
 
 useTestDatabase();
 

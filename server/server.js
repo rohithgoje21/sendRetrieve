@@ -2,14 +2,14 @@ const http = require("http");
 const mongoose = require("mongoose");
 const config = require("./src/config");
 const { createApp } = require("./src/app");
-const { initRealtime, closeRealtime } = require("./src/realtime");
-const { logger } = require("./src/lib/logger");
-const { connectRedis } = require("./src/lib/redis");
-const { storage } = require("./src/lib/storage");
-const { startCleanupJob } = require("./src/lib/cleanup");
-const Share = require("./src/models/Share");
-const User = require("./src/models/User");
-const RefreshToken = require("./src/models/RefreshToken");
+const { initRealtime, closeRealtime } = require("./src/modules/realtime/realtime");
+const { logger } = require("./src/infrastructure/logger");
+const { connectRedis } = require("./src/infrastructure/redis");
+const { storage } = require("./src/infrastructure/storage");
+const { startCleanupJob } = require("./src/workers/cleanup");
+const Share = require("./src/modules/shares/share.model");
+const User = require("./src/modules/users/user.model");
+const RefreshToken = require("./src/modules/auth/refreshToken.model");
 
 const warnAboutConfig = () => {
     if (config.env !== "production") return;

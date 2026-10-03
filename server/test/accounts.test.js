@@ -2,11 +2,11 @@ const crypto = require("crypto");
 const { app, storedFiles, createShare, useTestDatabase } = require("./helpers");
 const request = require("supertest");
 const jwt = require("jsonwebtoken");
-const Share = require("../src/models/Share");
-const User = require("../src/models/User");
-const RefreshToken = require("../src/models/RefreshToken");
-const mailer = require("../src/lib/mailer");
-const { deleteExpiredShares } = require("../src/lib/cleanup");
+const Share = require("../src/modules/shares/share.model");
+const User = require("../src/modules/users/user.model");
+const RefreshToken = require("../src/modules/auth/refreshToken.model");
+const mailer = require("../src/infrastructure/mailer");
+const { deleteExpiredShares } = require("../src/workers/cleanup");
 
 useTestDatabase();
 

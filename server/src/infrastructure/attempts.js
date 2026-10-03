@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const config = require("../config");
 const { logger } = require("./logger");
-const { HttpError } = require("./errors");
+const { HttpError } = require("../shared/errors");
 
 // Counts failed attempts against one target (a share's password, an account's
 // login) and locks it once there are too many in the window. Per-IP rate

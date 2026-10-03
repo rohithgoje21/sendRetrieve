@@ -1,6 +1,6 @@
 const crypto = require("crypto");
-const config = require("../config");
-const { HttpError } = require("./errors");
+const config = require("../../config");
+const { HttpError } = require("../../shared/errors");
 
 // One-time codes (e.g. "verify your email: 482913"), kept in the key-value
 // store (Redis when available) with an expiry, never stored in plain text.

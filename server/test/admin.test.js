@@ -4,8 +4,8 @@ const { promisify } = require("util");
 const mongoose = require("mongoose");
 const { app, storedFiles, createShare, PNG, useTestDatabase } = require("./helpers");
 const request = require("supertest");
-const User = require("../src/models/User");
-const Share = require("../src/models/Share");
+const User = require("../src/modules/users/user.model");
+const Share = require("../src/modules/shares/share.model");
 
 useTestDatabase();
 

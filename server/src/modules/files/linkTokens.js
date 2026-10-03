@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const config = require("../config");
+const config = require("../../config");
 
 // Signed, expiring tokens for links the server hands out:
 //   download  /api/files/:token, for someone who just opened a share (and

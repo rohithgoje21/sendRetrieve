@@ -3,8 +3,8 @@ const path = require("path");
 const { pipeline } = require("stream/promises");
 const { Transform } = require("stream");
 const config = require("../../config");
-const { createUploadToken } = require("../tokens");
-const { HttpError } = require("../errors");
+const { createUploadToken } = require("../../modules/files/linkTokens");
+const { HttpError } = require("../../shared/errors");
 
 // Files in a local folder. For tests and quick local runs: production should
 // use object storage, since a server's disk isn't shared between instances

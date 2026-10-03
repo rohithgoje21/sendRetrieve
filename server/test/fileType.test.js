@@ -1,4 +1,4 @@
-const { detectFileType, resolveFileType } = require("../src/lib/fileType");
+const { detectFileType, resolveFileType } = require("../src/modules/files/fileType");
 
 const bytes = (...parts) =>
     Buffer.concat(parts.map((p) => (typeof p === "string" ? Buffer.from(p, "latin1") : Buffer.from(p))));

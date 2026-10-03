@@ -2,8 +2,8 @@ const fs = require("fs");
 const path = require("path");
 const { app, uploadDir, storedFiles, createShare, PNG, useTestDatabase } = require("./helpers");
 const request = require("supertest");
-const Share = require("../src/models/Share");
-const { deleteExpiredShares, deleteOrphanFiles } = require("../src/lib/cleanup");
+const Share = require("../src/modules/shares/share.model");
+const { deleteExpiredShares, deleteOrphanFiles } = require("../src/workers/cleanup");
 
 useTestDatabase();
 

@@ -4,19 +4,21 @@ const express = require("express");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
 const config = require("./config");
-const { createSharesRouter } = require("./routes/shares");
-const { createAuthRouter } = require("./routes/auth");
-const { createMeRouter } = require("./routes/me");
-const { createHealthRouter } = require("./routes/health");
-const { createConfigRouter } = require("./routes/config");
-const { createAdminRouter } = require("./routes/admin");
-const { createUploadsRouter } = require("./routes/uploads");
-const { storage } = require("./lib/storage");
-const { createKeyValueStore } = require("./lib/kv");
-const { createOtpService } = require("./lib/otp");
-const { createRequestLogger } = require("./lib/requestLogging");
-const { createAttemptTracker } = require("./lib/attempts");
-const { HttpError, errorHandler } = require("./lib/errors");
+const { createSharesRouter } = require("./modules/shares/shares.routes");
+const { createAuthRouter } = require("./modules/auth/auth.routes");
+const { createUsersRouter } = require("./modules/users/users.routes");
+const { createMySharesRouter } = require("./modules/shares/myShares.routes");
+const { createDownloadsRouter } = require("./modules/files/downloads.routes");
+const { createHealthRouter } = require("./modules/system/health.routes");
+const { createConfigRouter } = require("./modules/system/config.routes");
+const { createAdminRouter } = require("./modules/admin/admin.routes");
+const { createUploadsRouter } = require("./modules/files/uploads.routes");
+const { storage } = require("./infrastructure/storage");
+const { createKeyValueStore } = require("./infrastructure/kv");
+const { createOtpService } = require("./modules/auth/otp");
+const { createRequestLogger } = require("./shared/requestLogging");
+const { createAttemptTracker } = require("./infrastructure/attempts");
+const { HttpError, errorHandler } = require("./shared/errors");
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -115,10 +117,12 @@ const createApp = ({ rateLimit = true, redis = null, logger } = {}) => {
     app.use(express.json({ limit: "512kb" }));
 
     app.use("/api/auth", createAuthRouter(ctx));
-    app.use("/api/me", createMeRouter(ctx));
+    app.use("/api/me/shares", createMySharesRouter(ctx));
+    app.use("/api/me", createUsersRouter(ctx));
     app.use("/api/admin", createAdminRouter(ctx));
     app.use("/api", createConfigRouter());
     app.use("/api", createSharesRouter(ctx));
+    app.use("/api", createDownloadsRouter(ctx));
     app.use("/api", () => {
         throw new HttpError(404, "Not found");
     });

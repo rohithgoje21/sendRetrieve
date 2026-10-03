@@ -1,23 +1,21 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
-const contentDisposition = require("content-disposition");
-const config = require("../config");
-const Share = require("../models/Share");
-const schemas = require("../lib/schemas");
-const { generateCode, normalizeCode } = require("../lib/codes");
-const { verifyDownloadToken } = require("../lib/tokens");
-const { storage, storageKey } = require("../lib/storage");
-const { HEAD_BYTES, resolveFileType } = require("../lib/fileType");
-const { HttpError } = require("../lib/errors");
-const { validateBody } = require("../lib/validate");
-const { limiter } = require("../lib/rateLimit");
-const { optionalAuth, hashToken, randomToken, manageTokenMatches } = require("../lib/auth");
-const { baseUrl } = require("../lib/urls");
-const { PREVIEWABLE_TYPES, liveFilter, serializeFile, discardShares } = require("../lib/shares");
-const { notifyShare } = require("../realtime");
+const config = require("../../config");
+const Share = require("./share.model");
+const schemas = require("./shares.schemas");
+const { generateCode, normalizeCode } = require("./codes");
+const { storage, storageKey } = require("../../infrastructure/storage");
+const { HEAD_BYTES, resolveFileType } = require("../files/fileType");
+const { HttpError } = require("../../shared/errors");
+const { validateBody } = require("../../shared/validate");
+const { limiter } = require("../../shared/rateLimit");
+const { optionalAuth } = require("../auth/middleware");
+const { createManageToken, manageTokenMatches } = require("./manageToken");
+const { baseUrl } = require("../../shared/urls");
+const { PREVIEWABLE_TYPES, liveFilter, serializeFile, discardShares, NOT_FOUND_MESSAGE } = require("./shares.service");
+const { notifyShare } = require("../realtime/realtime");
 
-const NOT_FOUND_MESSAGE = "Share not found. It may have expired or reached its view limit.";
 const UPLOAD_NOT_FOUND_MESSAGE = "This upload has expired or was already completed.";
 
 // Guest shares have no history to keep, so they get a purge date right away
@@ -176,7 +174,7 @@ const createSharesRouter = (ctx) => {
             // While uploading, expiresAt is the upload deadline; the chosen
             // expiry starts once the upload completes.
             const expiresAt = new Date(Date.now() + (pending ? config.uploadWindowSeconds : durationSeconds) * 1000);
-            const manageToken = randomToken();
+            const { token: manageToken, hash: manageTokenHash } = createManageToken();
 
             const share = await insertWithUniqueCode({
                 _id: shareId,
@@ -189,7 +187,7 @@ const createSharesRouter = (ctx) => {
                 expiresAt,
                 durationSeconds,
                 uploadPending: pending,
-                manageTokenHash: hashToken(manageToken),
+                manageTokenHash,
                 purgeAt: req.user ? null : new Date(expiresAt.getTime() + GUEST_PURGE_DELAY_MS),
             });
 
@@ -311,42 +309,6 @@ const createSharesRouter = (ctx) => {
                 expiresAt: state.expiresAt,
                 viewsRemaining: state.viewsRemaining,
                 downloadWindowSeconds: config.downloadWindowSeconds,
-            });
-        }
-    );
-
-    router.get(
-        "/files/:token",
-        limiter(ctx, { name: "download", limit: 300, error: "Too many downloads. Please wait a few minutes." }),
-        async (req, res) => {
-            const claims = verifyDownloadToken(req.params.token);
-            if (!claims) {
-                throw new HttpError(404, "This download link has expired. Open the share again to get a new one.");
-            }
-
-            const share = await Share.findOne({ code: claims.code, ...liveFilter() });
-            const file = share?.files.id(claims.fileId);
-            if (!file) throw new HttpError(404, NOT_FOUND_MESSAGE);
-
-            const inline = req.query.inline === "1" && PREVIEWABLE_TYPES.has(file.mimeType);
-            if (!inline) {
-                const updated = await Share.findOneAndUpdate(
-                    { _id: share._id, "files._id": file._id },
-                    { $inc: { "files.$.downloads": 1 } },
-                    { new: true, projection: { files: 1 } }
-                );
-                req.log.info({ event: "file.downloaded", shareId: share._id, fileId: file._id }, "File downloaded");
-                notifyShare(share, "file:downloaded", {
-                    fileId: file._id,
-                    fileName: file.originalName,
-                    downloads: updated?.files.id(file._id)?.downloads ?? file.downloads + 1,
-                });
-            }
-
-            await storage.sendDownload(res, {
-                key: file.storedName,
-                contentType: inline ? file.mimeType : "application/octet-stream",
-                contentDisposition: contentDisposition(file.originalName, { type: inline ? "inline" : "attachment" }),
             });
         }
     );

@@ -1,8 +1,8 @@
-const config = require("../config");
-const Share = require("../models/Share");
-const { createDownloadToken } = require("./tokens");
-const { storage } = require("./storage");
-const { notifyShare } = require("../realtime");
+const config = require("../../config");
+const Share = require("./share.model");
+const { createDownloadToken } = require("../files/linkTokens");
+const { storage } = require("../../infrastructure/storage");
+const { notifyShare } = require("../realtime/realtime");
 
 // Only types a browser renders as media are ever served inline, and only when
 // the file's contents confirmed the type (see fileType.js). Everything else
@@ -13,6 +13,8 @@ const PREVIEWABLE_TYPES = new Set([
     "video/mp4", "video/webm", "video/ogg",
     "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav", "audio/webm", "audio/mp4", "audio/aac",
 ]);
+
+const NOT_FOUND_MESSAGE = "Share not found. It may have expired or reached its view limit.";
 
 // A share that can be opened and downloaded from: uploaded, not ended, not expired.
 const liveFilter = () => ({ endedAt: null, uploadPending: { $ne: true }, expiresAt: { $gt: new Date() } });
@@ -115,6 +117,7 @@ const discardShares = async (shares) => {
 };
 
 module.exports = {
+    NOT_FOUND_MESSAGE,
     PREVIEWABLE_TYPES,
     liveFilter,
     serializeFile,

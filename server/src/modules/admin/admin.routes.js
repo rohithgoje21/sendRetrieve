@@ -1,14 +1,15 @@
 const express = require("express");
 const mongoose = require("mongoose");
-const Share = require("../models/Share");
-const User = require("../models/User");
-const schemas = require("../lib/schemas");
-const { HttpError } = require("../lib/errors");
-const { validateBody } = require("../lib/validate");
-const { normalizeCode } = require("../lib/codes");
-const { baseUrl } = require("../lib/urls");
-const { requireAuth, requireRole, revokeAllSessions } = require("../lib/auth");
-const { liveFilter, serializeOwnedShare, shareStatus, endShares, discardShares } = require("../lib/shares");
+const Share = require("../shares/share.model");
+const User = require("../users/user.model");
+const schemas = require("./admin.schemas");
+const { HttpError } = require("../../shared/errors");
+const { validateBody } = require("../../shared/validate");
+const { normalizeCode } = require("../shares/codes");
+const { baseUrl } = require("../../shared/urls");
+const { requireAuth, requireRole } = require("../auth/middleware");
+const { revokeAllSessions } = require("../auth/sessions");
+const { liveFilter, serializeOwnedShare, shareStatus, endShares, discardShares } = require("../shares/shares.service");
 
 const PAGE_SIZE = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -95,7 +96,7 @@ const createAdminRouter = () => {
         });
     });
 
-    router.patch("/users/:id", validateBody(schemas.adminUpdateUser), async (req, res) => {
+    router.patch("/users/:id", validateBody(schemas.updateUser), async (req, res) => {
         if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, "User not found");
         if (req.user._id.equals(req.params.id)) {
             // Guards against an admin locking everyone (themselves included) out.

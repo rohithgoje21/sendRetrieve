@@ -1,5 +1,5 @@
 const express = require("express");
-const config = require("../config");
+const config = require("../../config");
 
 const EXPIRY_LABELS = {
     "1h": "1 hour",

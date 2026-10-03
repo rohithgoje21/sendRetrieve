@@ -1,10 +1,12 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
-const config = require("../config");
-const User = require("../models/User");
-const RefreshToken = require("../models/RefreshToken");
-const { HttpError } = require("./errors");
+const config = require("../../config");
+const User = require("../users/user.model");
+const RefreshToken = require("./refreshToken.model");
+const { hashToken, randomToken, deriveKey } = require("../../shared/crypto");
 
+// Login sessions. Guards that use them are in middleware.js.
+//
 // Sessions use two httpOnly cookies:
 //   sr_at: short-lived JWT access token, sent with every request
 //   sr_rt: long-lived random refresh token, sent only to /api/auth, rotated on use
@@ -19,40 +21,7 @@ const REFRESH_PATH = "/api/auth";
 // window a reused token is treated as that race, not as theft.
 const REUSE_GRACE_MS = 30 * 1000;
 
-const deriveKey = (label) => crypto.createHmac("sha256", config.tokenSecret).update(label).digest();
-const jwtSecret = deriveKey("access-token");
-const realtimeSecret = deriveKey("realtime-token");
-
-const hashToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
-const randomToken = () => crypto.randomBytes(32).toString("base64url");
-
-// A share's manage token (given to whoever created it, guest or not) lets
-// them finish or cancel its upload and watch it live. Stored hashed.
-const manageTokenMatches = (share, token) => {
-    if (typeof token !== "string" || !token || !share?.manageTokenHash) return false;
-    const expected = Buffer.from(share.manageTokenHash);
-    const actual = Buffer.from(hashToken(token));
-    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-};
-
-// The Socket.IO connection may go to another origin (frontend on Vercel, API
-// on Render), where the session cookies aren't sent. The browser fetches this
-// short-lived token over the API and hands it to the socket instead.
-const createRealtimeToken = (user) =>
-    jwt.sign({}, realtimeSecret, {
-        subject: String(user._id),
-        audience: "realtime",
-        expiresIn: config.realtime.tokenTtlSeconds,
-        algorithm: "HS256",
-    });
-
-const verifyRealtimeToken = (token) => {
-    try {
-        return jwt.verify(token, realtimeSecret, { algorithms: ["HS256"], audience: "realtime" }).sub;
-    } catch {
-        return null;
-    }
-};
+const jwtSecret = deriveKey(config.tokenSecret, "access-token");
 
 const cookieOptions = (req, path) => ({
     httpOnly: true,
@@ -158,43 +127,11 @@ const readSession = async (req) => {
     return { user };
 };
 
-const sessionError = (reason) =>
-    new HttpError(401, reason === "token_expired" ? "Your session has expired" : "Please log in", { code: reason });
-
-const requireAuth = async (req, res, next) => {
-    const { user, reason } = await readSession(req);
-    if (!user) throw sessionError(reason);
-    req.user = user;
-    next();
-};
-
-// For endpoints that work for guests too. An expired token still fails, so
-// the client refreshes and retries instead of acting as a guest by mistake.
-const optionalAuth = async (req, res, next) => {
-    const { user, reason } = await readSession(req);
-    if (!user && reason === "token_expired") throw sessionError(reason);
-    req.user = user;
-    next();
-};
-
-// After requireAuth: only users with this role (e.g. "admin") get through.
-const requireRole = (role) => (req, res, next) => {
-    if (req.user?.role !== role) throw new HttpError(403, "You don't have permission to do that");
-    next();
-};
-
 module.exports = {
-    hashToken,
-    randomToken,
-    manageTokenMatches,
-    createRealtimeToken,
-    verifyRealtimeToken,
-    requireRole,
     issueSession,
     clearSession,
     rotateSession,
     revokeSession,
     revokeAllSessions,
-    requireAuth,
-    optionalAuth,
+    readSession,
 };

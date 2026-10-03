@@ -1,24 +1,23 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
-const config = require("../config");
-const User = require("../models/User");
-const schemas = require("../lib/schemas");
-const mailer = require("../lib/mailer");
-const { HttpError } = require("../lib/errors");
-const { validateBody } = require("../lib/validate");
-const { limiter } = require("../lib/rateLimit");
-const { baseUrl } = require("../lib/urls");
+const config = require("../../config");
+const User = require("../users/user.model");
+const schemas = require("./auth.schemas");
+const mailer = require("../../infrastructure/mailer");
+const { HttpError } = require("../../shared/errors");
+const { validateBody } = require("../../shared/validate");
+const { limiter } = require("../../shared/rateLimit");
+const { baseUrl } = require("../../shared/urls");
+const { hashToken, randomToken } = require("../../shared/crypto");
+const { requireAuth } = require("./middleware");
+const { createRealtimeToken } = require("../realtime/realtimeTokens");
 const {
-    hashToken,
-    randomToken,
     issueSession,
     clearSession,
     rotateSession,
     revokeSession,
     revokeAllSessions,
-    requireAuth,
-    createRealtimeToken,
-} = require("../lib/auth");
+} = require("./sessions");
 
 const VERIFY_EMAIL = "verify-email";
 
