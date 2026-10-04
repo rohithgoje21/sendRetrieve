@@ -55,7 +55,8 @@ const start = async () => {
     metrics.watch({ redis, realtime: connectionCount, queues: true });
     if (redis) reportBreakers(redis);
 
-    const app = createApp({ redis });
+    if (!config.rateLimits) logger.warn({ event: "rate_limits.off" }, "RATE_LIMITS=off: no per-IP rate limits. Only for load and end-to-end tests!");
+    const app = createApp({ redis, rateLimit: config.rateLimits });
     // One HTTP server for both the API and Socket.IO (which handles /socket.io).
     const server = http.createServer(app);
     await initRealtime(server, { redis });

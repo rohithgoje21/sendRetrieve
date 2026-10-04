@@ -47,11 +47,28 @@ describe("registration and login", () => {
         expect(me.body.user.email).toBe("ada@example.com");
     });
 
-    test("stores a bcrypt hash, not the password", async () => {
+    test("stores a scrypt hash, not the password", async () => {
         await register();
         const user = await User.findOne().lean();
-        expect(user.passwordHash).toMatch(/^\$2[aby]\$/);
+        expect(user.passwordHash).toMatch(/^scrypt\$\d+\$\d+\$\d+\$[\w+/=]+\$[\w+/=]+$/);
         expect(JSON.stringify(user)).not.toContain(PASSWORD);
+    });
+
+    test("accounts from before (bcrypt hashes) still log in, and are upgraded to scrypt", async () => {
+        await register();
+        await User.updateOne({}, { passwordHash: require("bcryptjs").hashSync(PASSWORD, 4) });
+        await request(app).post("/api/auth/login").send({ email: "ada@example.com", password: "wrong-password" }).expect(401);
+        expect((await User.findOne().lean()).passwordHash).toMatch(/^\$2/);
+        await request(app).post("/api/auth/login").send({ email: "ada@example.com", password: PASSWORD }).expect(200);
+        expect((await User.findOne().lean()).passwordHash).toMatch(/^scrypt\$/);
+        await request(app).post("/api/auth/login").send({ email: "ada@example.com", password: PASSWORD }).expect(200);
+    });
+
+    test("password-protected shares from before (bcrypt hashes) still open", async () => {
+        const { code } = await createShare(app, { text: "old secret", password: "open-sesame" });
+        await Share.updateOne({ code }, { passwordHash: require("bcryptjs").hashSync("open-sesame", 4) });
+        await request(app).post(`/api/shares/${code}/open`).send({ password: "nope" }).expect(401);
+        expect((await request(app).post(`/api/shares/${code}/open`).send({ password: "open-sesame" }).expect(200)).body.text).toBe("old secret");
     });
 
     test("rejects duplicate emails, regardless of case", async () => {

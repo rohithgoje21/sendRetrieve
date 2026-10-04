@@ -93,7 +93,6 @@ const config = {
     },
 
     // Lower in tests so the suite isn't dominated by hashing time.
-    bcryptRounds: process.env.NODE_ENV === "test" ? 4 : 12,
 
     // Shares owned by an account stay visible (without their content) under
     // "Expired"/"Deleted" for this long before being removed for good.
@@ -110,7 +109,7 @@ const config = {
         maxFiles: 10,
         maxTextLength: 100_000,
         minPasswordLength: 4,
-        maxPasswordLength: 72, // bcrypt ignores bytes past 72
+        maxPasswordLength: 72, // (bcrypt ignored bytes past 72; kept for older hashes)
     },
 
     expiryOptions: {
@@ -196,6 +195,10 @@ const config = {
     // How often the scheduler looks for expired shares, abandoned uploads and
     // orphaned files (only one worker instance does it per interval).
     cleanupIntervalMs: 60 * 1000,
+
+    // Per-IP rate limits. RATE_LIMITS=off is for load tests and end-to-end
+    // tests only (one machine sending everything); the server warns loudly.
+    rateLimits: process.env.RATE_LIMITS !== "off",
 
     // Prometheus metrics on a separate internal port (GET /metrics), never on
     // the public site. The API and the worker default to different ports so

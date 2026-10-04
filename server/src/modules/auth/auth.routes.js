@@ -1,5 +1,4 @@
 const express = require("express");
-const bcrypt = require("bcryptjs");
 const config = require("../../config");
 const User = require("../users/user.model");
 const schemas = require("./auth.schemas");
@@ -10,6 +9,7 @@ const { validateBody } = require("../../shared/validate");
 const { limiter } = require("../../shared/rateLimit");
 const { baseUrl } = require("../../shared/urls");
 const { hashToken, randomToken } = require("../../shared/crypto");
+const { hashPassword, verifyPassword, needsRehash, dummyHash } = require("../../shared/passwords");
 const { requireAuth } = require("./middleware");
 const { createRealtimeToken } = require("../realtime/realtimeTokens");
 const { startSession, clearSession, rotateSession, revokeSession, revokeAllSessions } = require("./sessions");
@@ -23,10 +23,6 @@ const sendVerificationCode = async (ctx, user) => {
     await requestEmail("verify-email", user.email, { name: user.name, code, minutes: Math.round(expiresInSeconds / 60) });
     return { resendAfterSeconds };
 };
-
-// Compared against when the email doesn't exist, so a login for an unknown
-// account takes as long as one with a wrong password.
-const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", config.bcryptRounds);
 
 const FORGOT_PASSWORD_MESSAGE =
     "If an account exists for that email, we've sent a link to reset the password.";
@@ -45,7 +41,7 @@ const createAuthRouter = (ctx) => {
                 user = await User.create({
                     name,
                     email,
-                    passwordHash: await bcrypt.hash(password, config.bcryptRounds),
+                    passwordHash: await hashPassword(password),
                 });
             } catch (err) {
                 if (err.code === 11000) throw new HttpError(409, "An account with this email already exists");
@@ -73,7 +69,7 @@ const createAuthRouter = (ctx) => {
             await ctx.attempts.assertNotLocked("login", email, "Too many failed login attempts for this account.");
 
             const user = await User.findOne({ email });
-            const valid = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
+            const valid = await verifyPassword(password, user?.passwordHash ?? (await dummyHash()));
             if (!user || !valid) {
                 const locked = await ctx.attempts.recordFailure("login", email);
                 const userId = user?._id ?? null;
@@ -83,6 +79,11 @@ const createAuthRouter = (ctx) => {
             }
 
             await ctx.attempts.reset("login", email);
+            // Hashed with an older scheme (bcrypt) or weaker settings: upgrade it now.
+            if (needsRehash(user.passwordHash)) {
+                user.passwordHash = await hashPassword(password);
+                await user.save();
+            }
             // Only after the password check, so it doesn't reveal disabled accounts.
             if (user.disabledAt) {
                 req.log.warn({ event: "auth.login_disabled", userId: user._id }, "Login to a disabled account");
@@ -209,7 +210,7 @@ const createAuthRouter = (ctx) => {
                 throw new HttpError(400, "This reset link is invalid or has expired. Request a new one.");
             }
 
-            user.passwordHash = await bcrypt.hash(req.body.password, config.bcryptRounds);
+            user.passwordHash = await hashPassword(req.body.password);
             user.passwordResetTokenHash = null;
             user.passwordResetExpiresAt = null;
             await user.save();

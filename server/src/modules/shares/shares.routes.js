@@ -1,6 +1,5 @@
 const express = require("express");
 const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
 const config = require("../../config");
 const Share = require("./share.model");
 const schemas = require("./shares.schemas");
@@ -17,6 +16,7 @@ const { PREVIEWABLE_TYPES, liveFilter, serializeFile, discardShares, NOT_FOUND_M
 const { notifyShare } = require("../realtime/realtime");
 const scanner = require("../../infrastructure/clamav");
 const { publish } = require("../../infrastructure/queue");
+const { hashPassword, verifyPassword } = require("../../shared/passwords");
 const { visitorToken } = require("../analytics/visitors");
 const { counters } = require("../../infrastructure/metrics");
 
@@ -290,7 +290,7 @@ const createSharesRouter = (ctx) => {
                 ownerId: req.user?._id ?? null,
                 text,
                 files: fileDocs,
-                passwordHash: password ? await bcrypt.hash(password, config.bcryptRounds) : null,
+                passwordHash: password ? await hashPassword(password) : null,
                 maxViews,
                 viewsRemaining: maxViews,
                 expiresAt,
@@ -470,7 +470,7 @@ const createSharesRouter = (ctx) => {
 
                 const shareId = String(share._id);
                 await ctx.attempts.assertNotLocked("share", shareId, "Too many wrong passwords for this share.");
-                if (!(await bcrypt.compare(password, share.passwordHash))) {
+                if (!(await verifyPassword(password, share.passwordHash))) {
                     const locked = await ctx.attempts.recordFailure("share", shareId);
                     req.log.warn({ event: "share.password_failed", shareId }, "Wrong share password");
                     if (locked) req.log.warn({ event: "share.locked", shareId }, "Share locked after repeated wrong passwords");

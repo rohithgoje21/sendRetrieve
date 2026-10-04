@@ -1,5 +1,4 @@
 const express = require("express");
-const bcrypt = require("bcryptjs");
 const config = require("../../config");
 const Share = require("../shares/share.model");
 const User = require("./user.model");
@@ -11,6 +10,7 @@ const { ShareStat } = require("../analytics/stats.models");
 const { deviceLabel } = require("../auth/devices");
 const schemas = require("./users.schemas");
 const { HttpError } = require("../../shared/errors");
+const { hashPassword, verifyPassword: passwordMatches } = require("../../shared/passwords");
 const { validateBody } = require("../../shared/validate");
 const { limiter } = require("../../shared/rateLimit");
 const { publish } = require("../../infrastructure/queue");
@@ -20,7 +20,7 @@ const { startSession, clearSession, revokeAllSessions, revokeOtherSessions, revo
 
 // Throws 401 (blaming `field`) unless `password` is the user's password.
 const verifyPassword = async (req, password, { field, message }) => {
-    if (!(await bcrypt.compare(password, req.user.passwordHash))) {
+    if (!(await passwordMatches(password, req.user.passwordHash))) {
         req.log.warn({ event: "account.password_check_failed", field }, "Wrong current password");
         throw new HttpError(401, message, { field });
     }
@@ -57,7 +57,7 @@ const createUsersRouter = (ctx) => {
                 message: "Current password is incorrect",
             });
 
-            req.user.passwordHash = await bcrypt.hash(newPassword, config.bcryptRounds);
+            req.user.passwordHash = await hashPassword(newPassword);
             await req.user.save();
 
             // Log out everywhere else; keep this browser signed in.

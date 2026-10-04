@@ -42,11 +42,28 @@ const serveClient = (app) => {
         express.static(path.join(config.clientDir, "assets"), { immutable: true, maxAge: "1y", fallthrough: false })
     );
     app.use(express.static(config.clientDir, { index: false }));
+    // index.html is served from memory: it's requested for every page load,
+    // and reading it from disk each time goes through libuv's thread pool,
+    // which password hashing also uses (the load tests showed page loads
+    // queueing behind logins). Read again if the file changes (a new build).
+    let page = null;
+    const loadIndex = () => {
+        const stats = fs.statSync(indexHtml, { throwIfNoEntry: false });
+        if (!stats) return null;
+        if (page?.mtimeMs !== stats.mtimeMs) page = { mtimeMs: stats.mtimeMs, html: fs.readFileSync(indexHtml) };
+        return page.html;
+    };
+    let checkedAt = 0;
     app.use((req, res, next) => {
         if (req.method !== "GET" && req.method !== "HEAD") return next();
         if (path.extname(req.path)) return next();
-        if (!fs.existsSync(indexHtml)) return res.status(503).type("text").send(CLIENT_NOT_BUILT);
-        res.sendFile(indexHtml, { headers: { "Cache-Control": "no-cache" } });
+        // Look at the file at most once a second.
+        if (!page || Date.now() - checkedAt > 1000) {
+            checkedAt = Date.now();
+            loadIndex();
+        }
+        if (!page) return res.status(503).type("text").send(CLIENT_NOT_BUILT);
+        res.set("Cache-Control", "no-cache").type("html").send(page.html);
     });
     app.use(() => {
         throw new HttpError(404, "Not found");
