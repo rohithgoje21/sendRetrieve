@@ -1,0 +1,5 @@
+# Files used inside Linux containers keep LF line endings on every OS: with
+# Windows (CRLF) line endings, ClamAV can't parse its config and shell
+# scripts break.
+docker/** text eol=lf
+*.sh text eol=lf
