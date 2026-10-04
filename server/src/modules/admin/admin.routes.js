@@ -14,9 +14,11 @@ const { liveFilter, serializeOwnedShare, shareStatus, endShares, discardShares }
 const { getBus, isQueue } = require("../../infrastructure/queue");
 const { siteAnalytics } = require("../analytics/analytics.service");
 const { periodParam } = require("../analytics/analytics.routes");
-const { emailBreaker } = require("../../infrastructure/mailer");
-const { scannerBreaker } = require("../../infrastructure/clamav");
-const { pushBreaker } = require("../../infrastructure/webPush");
+const { breakerStates } = require("../../infrastructure/breakerStatus");
+// (loaded so their breakers exist in this process, and are listed)
+require("../../infrastructure/mailer");
+require("../../infrastructure/clamav");
+require("../../infrastructure/webPush");
 
 const PAGE_SIZE = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -33,7 +35,7 @@ const serializeUser = (user, activeShares = 0) => ({
 // background jobs, for admins and superadmins (each route names the
 // permission it needs; see auth/permissions.js). Make the first superadmin
 // with: npm run set-role -w server -- <email> superadmin
-const createAdminRouter = () => {
+const createAdminRouter = (ctx = {}) => {
     const router = express.Router();
     router.use(requireAuth, authorize("admin.access"));
 
@@ -196,7 +198,8 @@ const createAdminRouter = () => {
     router.get("/queues", authorize("queues.read"), async (req, res) => {
         const bus = getBus();
         res.set("Cache-Control", "no-store");
-        res.json({ broker: bus.kind, queues: await bus.stats(), circuitBreakers: [emailBreaker.snapshot(), scannerBreaker.snapshot(), pushBreaker.snapshot()] });
+        // Breakers from every process (with RabbitMQ, the worker's matter most).
+        res.json({ broker: bus.kind, queues: await bus.stats(), circuitBreakers: await breakerStates(ctx.redis) });
     });
 
     const queueParam = (req) => {

@@ -197,6 +197,11 @@ const config = {
     // orphaned files (only one worker instance does it per interval).
     cleanupIntervalMs: 60 * 1000,
 
+    // Prometheus metrics on a separate internal port (GET /metrics), never on
+    // the public site. The API and the worker default to different ports so
+    // both can run on one machine; METRICS_PORT=0 turns metrics off.
+    metricsPort: (fallback) => (process.env.METRICS_PORT === "0" ? null : Number(process.env.METRICS_PORT) || fallback),
+
     queue: {
         // RabbitMQ. Without it, an in-process queue with the same retry and
         // dead-letter behavior is used (fine for one server and for tests).

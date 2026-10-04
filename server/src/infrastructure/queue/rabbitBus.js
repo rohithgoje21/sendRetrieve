@@ -159,10 +159,13 @@ class RabbitBus {
             for (const [name, { description }] of Object.entries(QUEUES)) {
                 const main = await channel.checkQueue(name);
                 const dlq = await channel.checkQueue(deadLetterQueue(name));
+                let retrying = 0;
+                for (const delay of this.retryDelaysMs) retrying += (await channel.checkQueue(retryQueue(name, delay))).messageCount;
                 result.push({
                     name,
                     description,
                     ready: main.messageCount,
+                    retrying,
                     consumers: main.consumerCount,
                     deadLettered: dlq.messageCount,
                 });

@@ -9,6 +9,7 @@ const { PREVIEWABLE_TYPES, liveFilter, NOT_FOUND_MESSAGE } = require("../shares/
 const { notifyShare } = require("../realtime/realtime");
 const { publish } = require("../../infrastructure/queue");
 const { visitorToken } = require("../analytics/visitors");
+const { counters } = require("../../infrastructure/metrics");
 
 // GET /api/files/:token: a download link handed out when a share is opened.
 // Checks the share is still live, counts the download, then hands over the
@@ -48,6 +49,8 @@ const createDownloadsRouter = (ctx) => {
                     { new: true, projection: { files: 1 } }
                 );
                 const downloads = updated?.files.id(file._id)?.downloads ?? file.downloads + 1;
+                counters.downloads.inc();
+                counters.downloadBytes.inc(file.size);
                 req.log.info({ event: "file.downloaded", shareId: share._id, fileId: file._id }, "File downloaded");
                 notifyShare(share, "file:downloaded", { fileId: file._id, fileName: file.originalName, downloads });
                 // For the owner's notifications (and analytics).

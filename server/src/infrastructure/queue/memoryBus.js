@@ -13,12 +13,14 @@ class MemoryBus {
         this.handlers = new Map(); // queue -> handler
         this.waiting = new Map(); // queue -> messages published before a consumer existed
         this.deadLetters = new Map(); // queue -> failed messages
+        this.retrying = new Map(); // queue -> messages waiting for a retry
         this.inFlight = 0;
         this.timers = new Set();
         this.idleWaiters = [];
         for (const queue of Object.keys(QUEUES)) {
             this.waiting.set(queue, []);
             this.deadLetters.set(queue, []);
+            this.retrying.set(queue, 0);
         }
     }
 
@@ -48,8 +50,10 @@ class MemoryBus {
             return;
         }
         this.inFlight++;
+        if (delayMs > 0) this.retrying.set(queue, this.retrying.get(queue) + 1);
         const timer = setTimeout(async () => {
             this.timers.delete(timer);
+            if (delayMs > 0) this.retrying.set(queue, this.retrying.get(queue) - 1);
             try {
                 await handler(message, { attempt, queue });
             } catch (err) {
@@ -85,6 +89,7 @@ class MemoryBus {
             name,
             description: QUEUES[name].description,
             ready: this.waiting.get(name).length,
+            retrying: this.retrying.get(name),
             consumers: this.handlers.has(name) ? 1 : 0,
             deadLettered: this.deadLetters.get(name).length,
         }));

@@ -8,9 +8,9 @@ const { connectRedis } = require("./src/infrastructure/redis");
 const { storage } = require("./src/infrastructure/storage");
 const { initBus, getBus } = require("./src/infrastructure/queue");
 const { startWorkers } = require("./src/workers");
-const Share = require("./src/modules/shares/share.model");
-const User = require("./src/modules/users/user.model");
-const RefreshToken = require("./src/modules/auth/refreshToken.model");
+const metrics = require("./src/infrastructure/metrics");
+const { reportBreakers } = require("./src/infrastructure/breakerStatus");
+const { connectionCount } = require("./src/modules/realtime/realtime");
 
 const warnAboutConfig = () => {
     if (config.env !== "production") return;
@@ -32,9 +32,9 @@ const start = async () => {
     await mongoose.connect(config.mongoUri);
     logger.info({ event: "mongo.connected" }, "Connected to MongoDB");
 
-    // Brings indexes in line with the schemas, e.g. replacing Phase 1's TTL
-    // index on expiresAt, which would otherwise delete owned shares' history.
-    await Promise.all([Share.syncIndexes(), User.syncIndexes(), RefreshToken.syncIndexes()]);
+    // Brings every collection's indexes in line with its schema (adding new
+    // ones, replacing changed ones such as TTLs, dropping removed ones).
+    await Promise.all(Object.values(mongoose.models).map((model) => model.syncIndexes()));
 
     // Fail fast if the bucket is missing or the credentials are wrong.
     await storage.init();
@@ -49,6 +49,11 @@ const start = async () => {
     await initBus();
     const workers = config.queue.inlineWorkers ? await startWorkers({ redis }) : null;
     if (!workers) logger.info("Workers run in a separate process (npm run worker)");
+
+    const metricsPort = config.metricsPort(9091);
+    const metricsServer = metricsPort ? metrics.startMetricsServer(metricsPort) : null;
+    metrics.watch({ redis, realtime: connectionCount, queues: true });
+    if (redis) reportBreakers(redis);
 
     const app = createApp({ redis });
     // One HTTP server for both the API and Socket.IO (which handles /socket.io).
@@ -81,6 +86,7 @@ const start = async () => {
             const closed = closeRealtime();
             server.closeIdleConnections();
             await closed;
+            metricsServer?.close();
             await getBus().close();
             await mongoose.disconnect();
             if (redis) await redis.close();

@@ -1,0 +1,101 @@
+# Alert rules (checked in CI with promtool). Queue and breaker gauges are
+# reported by both the API and the workers, so they're aggregated with max.
+
+groups:
+  - name: sendretrieve
+    rules:
+      - alert: TargetDown
+        expr: up{job=~"api|worker"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: "Prometheus hasn't been able to scrape {{ $labels.instance }} for 2 minutes."
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(sr_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(sr_http_requests_total[5m])) > 0.05
+          and sum(rate(sr_http_requests_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "More than 5% of requests are failing"
+          description: "{{ $value | humanizePercentage }} of API requests returned a 5xx in the last 5 minutes."
+
+      - alert: SlowRequests
+        # Not uploads to disk storage (they stream through the API, slow by
+        # nature), nor health probes (they wait for slow dependencies).
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(sr_http_request_duration_seconds_bucket{route!~"/api/uploads.*|/healthz"}[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency above 1s"
+          description: "95% of requests take up to {{ $value | humanizeDuration }}."
+
+      - alert: DeadLetters
+        expr: max by (queue) (sr_queue_messages{state="dead"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dead-lettered messages in {{ $labels.queue }}"
+          description: "{{ $value }} message(s) failed every retry. Inspect and replay them from the admin page."
+
+      - alert: QueueBacklog
+        expr: max by (queue) (sr_queue_messages{state="ready"}) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.queue }} is backing up"
+          description: "{{ $value }} messages waiting for 10 minutes: workers may be down or too few."
+
+      - alert: JobFailures
+        expr: sum by (queue) (rate(sr_jobs_total{outcome="failed"}[10m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Jobs in {{ $labels.queue }} keep failing"
+          description: "{{ $value | humanize }} failed attempts per second over 10 minutes."
+
+      - alert: CircuitOpen
+        expr: max by (name) (sr_circuit_breaker_state) == 2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.name }} circuit is open"
+          description: "Calls to {{ $labels.name }} have been failing; they're paused and retried later."
+
+      - alert: BrokerDown
+        expr: min(sr_queue_up) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The message broker is unreachable"
+          description: "Background jobs (emails, scans, cleanup) are waiting."
+
+      - alert: RedisDown
+        expr: min(sr_redis_up) == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis is unreachable"
+          description: "Rate limits fall back to per-instance memory; live updates aren't shared between instances."
+
+      - alert: EventLoopLag
+        expr: max(nodejs_eventloop_lag_p99_seconds) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node.js event loop lagging"
+          description: "p99 event loop lag is {{ $value | humanizeDuration }}: the process is overloaded or blocked."

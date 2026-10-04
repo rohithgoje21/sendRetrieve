@@ -140,4 +140,7 @@ const closeRealtime = async () => {
     await Promise.all(clients.map((client) => client.close().catch(() => {})));
 };
 
-module.exports = { initRealtime, initRealtimeEmitter, notifyShare, notifyUser, closeRealtime };
+// Open Socket.IO connections in this process (metrics).
+const connectionCount = () => io?.engine?.clientsCount ?? 0;
+
+module.exports = { initRealtime, initRealtimeEmitter, notifyShare, notifyUser, closeRealtime, connectionCount };

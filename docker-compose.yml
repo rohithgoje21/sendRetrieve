@@ -5,6 +5,12 @@
 #   MinIO console     http://localhost:9001    (MINIO_CONSOLE_PORT)
 #   RabbitMQ console  http://localhost:15672   (RABBITMQ_CONSOLE_PORT)
 #
+# Monitoring (optional):   docker compose --profile monitoring up --build
+#
+#   Grafana           http://localhost:3000    (GRAFANA_PORT)  admin / GRAFANA_ADMIN_PASSWORD
+#   Prometheus        http://localhost:9090    (PROMETHEUS_PORT)
+#   Alertmanager      http://localhost:9093    (ALERTMANAGER_PORT)
+#
 # Values below can be overridden from a .env file next to this one. All
 # credentials here are for local use only.
 
@@ -140,8 +146,50 @@ services:
       - clamav-data:/var/lib/clamav
     restart: unless-stopped
 
+  # ---- Monitoring (profile "monitoring") ----
+  # The API and workers serve metrics on internal ports (9091, 9092) that
+  # aren't published; Prometheus scrapes them over the Docker network.
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    profiles: [monitoring]
+    volumes:
+      - ./docker/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: [monitoring]
+    volumes:
+      - ./docker/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    profiles: [monitoring]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-sendretrieve-dev-secret}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/sendretrieve.json
+    volumes:
+      - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   clamav-data:
+  grafana-data:
+  prometheus-data:
   mongo-data:
   minio-data:
   rabbitmq-data:

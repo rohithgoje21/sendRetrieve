@@ -8,6 +8,7 @@ import { Alert, Badge, Card, Skeleton } from "@/components/ui/feedback";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useSession } from "@/hooks/useSession";
 import { SiteAnalytics } from "@/components/SiteAnalytics";
+import { BackgroundJobs } from "@/components/BackgroundJobs";
 import { api } from "@/lib/api";
 import { can } from "@/lib/permissions";
 import { formatCode, formatDate, formatDateTime, formatSize, normalizeCodeInput, pluralize, stripCode } from "@/lib/format";
@@ -333,6 +334,7 @@ function ShareLookup() {
 }
 
 export default function AdminPage() {
+    const { user: me } = useSession();
     return (
         <div className="space-y-6">
             <title>Admin · sendRetrieve</title>
@@ -346,6 +348,7 @@ export default function AdminPage() {
             <SiteAnalytics />
             <UsersTable />
             <ShareLookup />
+            {can(me, "queues.read") && <BackgroundJobs />}
             <p className="flex items-center gap-1.5 text-xs text-zinc-500">
                 <Upload className="size-3.5" aria-hidden /> Stats refresh every 30 seconds.
             </p>

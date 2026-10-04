@@ -308,6 +308,29 @@ export interface SiteAnalytics {
     uploadsByType: Record<FileCategory, { files: number; bytes: number }>;
 }
 
+// Admin: background jobs (GET /api/admin/queues)
+export interface QueueStats {
+    name: string;
+    description: string;
+    ready: number;
+    retrying?: number;
+    consumers: number;
+    deadLettered: number;
+}
+
+export interface QueuesOverview {
+    broker: "memory" | "rabbitmq";
+    queues: QueueStats[];
+    circuitBreakers: { name: string; state: "closed" | "half_open" | "open"; failures: number }[];
+}
+
+export interface DeadLetter {
+    message: { id?: string; type?: string; occurredAt?: string } | null;
+    attempts: number | null;
+    error: string | null;
+    failedAt: string | null;
+}
+
 // Admin dashboard
 export interface AdminStats {
     users: { total: number; verified: number; disabled: number; admins: number; newThisWeek: number };

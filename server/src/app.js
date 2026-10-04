@@ -14,6 +14,7 @@ const { createConfigRouter } = require("./modules/system/config.routes");
 const { createAdminRouter } = require("./modules/admin/admin.routes");
 const { createNotificationsRouter } = require("./modules/notifications/notifications.routes");
 const { createAnalyticsRouter } = require("./modules/analytics/analytics.routes");
+const { httpMetrics } = require("./infrastructure/metrics");
 const { createUploadsRouter } = require("./modules/files/uploads.routes");
 const { storage } = require("./infrastructure/storage");
 const { createKeyValueStore } = require("./infrastructure/kv");
@@ -96,6 +97,7 @@ const createApp = ({ rateLimit = true, redis = null, logger } = {}) => {
     app.disable("x-powered-by");
 
     // First, so every request has an ID and a logger.
+    app.use(httpMetrics);
     app.use(createRequestLogger(logger));
     app.use(
         helmet({

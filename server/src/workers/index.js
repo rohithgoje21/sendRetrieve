@@ -2,6 +2,7 @@ const { getBus } = require("../infrastructure/queue");
 const { createKeyValueStore } = require("../infrastructure/kv");
 const { createLocks } = require("../infrastructure/locks");
 const { logger } = require("../infrastructure/logger");
+const metrics = require("../infrastructure/metrics");
 const { startScheduler } = require("./scheduler");
 
 // Background workers. Run in their own process (server/worker.js) when
@@ -19,16 +20,21 @@ const PROCESSED_TTL_SECONDS = 24 * 60 * 60;
 // deliver at least once, so the same message can arrive twice).
 const asJob = ({ queue, handle }, ctx) => async (message, { attempt }) => {
     const doneKey = `job:${queue}:${message.id}`;
-    if (await ctx.kv.get(doneKey).catch(() => null)) return;
+    if (await ctx.kv.get(doneKey).catch(() => null)) {
+        metrics.recordJob(queue, message.type, "duplicate");
+        return;
+    }
 
     const log = ctx.log.child({ queue, messageId: message.id, type: message.type, attempt });
     const started = Date.now();
     try {
         await handle(message, { ...ctx, log });
     } catch (err) {
+        metrics.recordJob(queue, message.type, "failed", (Date.now() - started) / 1000);
         log.warn({ err, event: "job.failed", durationMs: Date.now() - started }, "Job failed");
         throw err;
     }
+    metrics.recordJob(queue, message.type, "success", (Date.now() - started) / 1000);
     await ctx.kv.set(doneKey, "1", PROCESSED_TTL_SECONDS).catch(() => {});
     log.debug({ event: "job.completed", durationMs: Date.now() - started }, "Job completed");
 };

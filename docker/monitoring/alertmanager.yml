@@ -1,0 +1,25 @@
+# Alertmanager: groups and routes alerts from Prometheus. Out of the box it
+# doesn't notify anyone; firing alerts are listed at http://localhost:9093.
+# To get notified, add a receiver, e.g.:
+#
+#   receivers:
+#     - name: team
+#       email_configs:
+#         - to: ops@example.com
+#           from: alerts@example.com
+#           smarthost: smtp.example.com:587
+#           auth_username: alerts@example.com
+#           auth_password: <secret>
+#       # or slack_configs / webhook_configs
+#
+# and point route.receiver at it.
+
+route:
+  receiver: dashboard-only
+  group_by: [alertname, queue, name]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: dashboard-only

@@ -35,8 +35,19 @@ const withTimeout = (promise, ms, name) => {
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 };
 
+// Every breaker, for metrics and the admin dashboard, and listeners to any
+// breaker's state changes (infrastructure/breakerStatus.js).
+const breakers = new Set();
+const allBreakers = () => [...breakers];
+const changeListeners = new Set();
+const onBreakerChange = (fn) => {
+    changeListeners.add(fn);
+    return () => changeListeners.delete(fn);
+};
+
 class CircuitBreaker {
     constructor(name, options = {}) {
+        breakers.add(this);
         this.name = name;
         this.failureThreshold = options.failureThreshold ?? config.circuitBreaker.failureThreshold;
         this.resetTimeoutMs = options.resetTimeoutMs ?? config.circuitBreaker.resetTimeoutMs;
@@ -53,6 +64,7 @@ class CircuitBreaker {
         const previous = this.state;
         this.state = state;
         this.onStateChange(state, previous);
+        for (const listener of changeListeners) listener(this);
     }
 
     async exec(fn) {
@@ -108,4 +120,4 @@ const retryWithBackoff = async (fn, { attempts = 3, baseMs = 200, shouldRetry = 
     }
 };
 
-module.exports = { CircuitBreaker, CircuitOpenError, TimeoutError, withTimeout, backoffDelay, retryWithBackoff };
+module.exports = { CircuitBreaker, CircuitOpenError, TimeoutError, withTimeout, backoffDelay, retryWithBackoff, allBreakers, onBreakerChange };

@@ -18,14 +18,18 @@ const { notifyShare } = require("../realtime/realtime");
 const scanner = require("../../infrastructure/clamav");
 const { publish } = require("../../infrastructure/queue");
 const { visitorToken } = require("../analytics/visitors");
+const { counters } = require("../../infrastructure/metrics");
 
-// For statistics (the analytics worker): a share with its content in place.
-const publishCreated = (share) =>
-    publish("share.created", {
+// For statistics (metrics, and the analytics worker): a share with its content in place.
+const publishCreated = (share) => {
+    counters.sharesCreated.inc();
+    counters.uploadBytes.inc(share.files.reduce((sum, f) => sum + f.size, 0));
+    return publish("share.created", {
         shareId: String(share._id),
         ownerId: share.ownerId ? String(share.ownerId) : null,
         files: share.files.map((f) => ({ size: f.size, mimeType: f.mimeType })),
     });
+};
 
 const UPLOAD_NOT_FOUND_MESSAGE = "This upload has expired or was already completed.";
 

@@ -11,6 +11,8 @@ const { storage } = require("./src/infrastructure/storage");
 const { initBus, getBus } = require("./src/infrastructure/queue");
 const { startWorkers } = require("./src/workers");
 const { initRealtimeEmitter } = require("./src/modules/realtime/realtime");
+const metrics = require("./src/infrastructure/metrics");
+const { reportBreakers } = require("./src/infrastructure/breakerStatus");
 
 const start = async () => {
     await mongoose.connect(config.mongoUri);
@@ -24,6 +26,10 @@ const start = async () => {
         logger.warn("AMQP_URL isn't set: with the in-process queue, the API runs the workers itself");
     }
     const workers = await startWorkers({ redis });
+    const metricsPort = config.metricsPort(9092);
+    const metricsServer = metricsPort ? metrics.startMetricsServer(metricsPort) : null;
+    metrics.watch({ redis, queues: true });
+    if (redis) reportBreakers(redis);
 
     let stopping = false;
     const shutdown = async (signal) => {
@@ -32,6 +38,7 @@ const start = async () => {
         logger.info({ event: "worker.stopping", signal }, "Worker shutting down");
         setTimeout(() => process.exit(1), config.shutdownTimeoutMs).unref();
         workers.stop();
+        metricsServer?.close();
         // Unacknowledged jobs go back to the queue for another worker.
         await getBus().close();
         await mongoose.disconnect();

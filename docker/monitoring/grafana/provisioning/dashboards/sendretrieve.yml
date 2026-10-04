@@ -1,0 +1,9 @@
+# Loads the dashboards in /var/lib/grafana/dashboards (docker/monitoring/grafana/dashboards).
+apiVersion: 1
+providers:
+  - name: sendretrieve
+    folder: sendRetrieve
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
