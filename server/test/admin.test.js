@@ -94,25 +94,87 @@ describe("users", () => {
         await loginAgent("target@example.com");
     });
 
-    test("roles can be granted and revoked", async () => {
-        const { agent: admin } = await register("boss@example.com", { role: "admin" });
+    test("a superadmin can grant and revoke roles", async () => {
+        const { agent: root } = await register("root@example.com", { role: "superadmin" });
         const { user } = await register("helper@example.com");
-        await admin.patch(`/api/admin/users/${user.id}`).send({ role: "admin" }).expect(200);
+        await root.patch(`/api/admin/users/${user.id}`).send({ role: "admin" }).expect(200);
         const helper = await loginAgent("helper@example.com");
         await helper.get("/api/admin/stats").expect(200);
-        await admin.patch(`/api/admin/users/${user.id}`).send({ role: "user" }).expect(200);
+        await root.patch(`/api/admin/users/${user.id}`).send({ role: "user" }).expect(200);
         await helper.get("/api/admin/stats").expect(403);
     });
 
-    test("admins can't change themselves, and bad input is rejected", async () => {
-        const { agent: admin, user } = await register("boss@example.com", { role: "admin" });
-        await admin.patch(`/api/admin/users/${user.id}`).send({ disabled: true }).expect(400);
-        await admin.patch(`/api/admin/users/${user.id}`).send({ role: "user" }).expect(400);
-        await admin.patch(`/api/admin/users/${new mongoose.Types.ObjectId()}`).send({ disabled: true }).expect(404);
-        await admin.patch("/api/admin/users/not-an-id").send({ disabled: true }).expect(404);
+    test("nobody can change themselves, and bad input is rejected", async () => {
+        const { agent: root, user } = await register("root@example.com", { role: "superadmin" });
+        await root.patch(`/api/admin/users/${user.id}`).send({ disabled: true }).expect(400);
+        await root.patch(`/api/admin/users/${user.id}`).send({ role: "user" }).expect(400);
+        await root.patch(`/api/admin/users/${new mongoose.Types.ObjectId()}`).send({ disabled: true }).expect(404);
+        await root.patch("/api/admin/users/not-an-id").send({ disabled: true }).expect(404);
         const { user: other } = await register("other@example.com");
-        await admin.patch(`/api/admin/users/${other.id}`).send({ role: "owner" }).expect(400);
-        await admin.patch(`/api/admin/users/${other.id}`).send({}).expect(400);
+        await root.patch(`/api/admin/users/${other.id}`).send({ role: "owner" }).expect(400);
+        await root.patch(`/api/admin/users/${other.id}`).send({}).expect(400);
+    });
+
+    test("an admin can log a user out on every device", async () => {
+        const { agent: admin } = await register("boss@example.com", { role: "admin" });
+        const { agent: victim, user } = await register("victim@example.com");
+        await admin.post(`/api/admin/users/${user.id}/logout`).expect(204);
+        await victim.get("/api/auth/me").expect(401);
+        await victim.post("/api/auth/refresh").expect(401);
+    });
+});
+
+describe("permissions by role", () => {
+    test("each role's permissions are part of the public user", async () => {
+        const { user: regular } = await register("user@example.com");
+        await register("boss@example.com", { role: "admin" });
+        await register("root@example.com", { role: "superadmin" });
+        expect(regular.permissions).toEqual([]);
+        // (the roles were set after registering; /me has the current ones)
+        const me = async (email) => (await (await loginAgent(email)).get("/api/auth/me")).body.user;
+        const admin = await me("boss@example.com");
+        expect(admin.permissions).toEqual(expect.arrayContaining(["admin.access", "users.disable"]));
+        expect(admin.permissions).not.toContain("users.roles");
+        expect((await me("root@example.com")).permissions).toEqual(expect.arrayContaining(["admin.access", "users.roles", "queues.purge"]));
+    });
+
+    test("admins manage regular users only; roles and admins are for superadmins", async () => {
+        const { agent: admin } = await register("boss@example.com", { role: "admin" });
+        const { user: regular } = await register("user@example.com");
+        const { user: otherAdmin } = await register("other-admin@example.com", { role: "admin" });
+        const { user: root } = await register("root@example.com", { role: "superadmin" });
+
+        await admin.patch(`/api/admin/users/${regular.id}`).send({ disabled: true }).expect(200);
+        expect((await admin.patch(`/api/admin/users/${regular.id}`).send({ role: "admin" }).expect(403)).body.error).toBe(
+            "Only a superadmin can change roles"
+        );
+        expect((await admin.patch(`/api/admin/users/${otherAdmin.id}`).send({ disabled: true }).expect(403)).body.error).toBe(
+            "Only a superadmin can manage admins"
+        );
+        await admin.post(`/api/admin/users/${otherAdmin.id}/logout`).expect(403);
+        await admin.patch(`/api/admin/users/${root.id}`).send({ disabled: true }).expect(403);
+    });
+
+    test("superadmins manage admins, but superadmins only change through the script", async () => {
+        const { agent: root } = await register("root@example.com", { role: "superadmin" });
+        const { user: admin } = await register("boss@example.com", { role: "admin" });
+        const { user: otherRoot } = await register("root2@example.com", { role: "superadmin" });
+
+        await root.patch(`/api/admin/users/${admin.id}`).send({ disabled: true }).expect(200);
+        await root.patch(`/api/admin/users/${admin.id}`).send({ disabled: false, role: "superadmin" }).expect(200);
+        expect((await root.patch(`/api/admin/users/${otherRoot.id}`).send({ role: "user" }).expect(403)).body.error).toBe(
+            "Superadmin accounts can't be changed here"
+        );
+    });
+
+    test("purging dead letters is for superadmins; admins can look and replay", async () => {
+        const { agent: admin } = await register("boss@example.com", { role: "admin" });
+        const { agent: root } = await register("root@example.com", { role: "superadmin" });
+        await admin.get("/api/admin/queues").expect(200);
+        await admin.get("/api/admin/queues/sr.notifications/dead-letters").expect(200);
+        await admin.post("/api/admin/queues/sr.notifications/dead-letters/replay").expect(200);
+        await admin.delete("/api/admin/queues/sr.notifications/dead-letters").expect(403);
+        await root.delete("/api/admin/queues/sr.notifications/dead-letters").expect(200);
     });
 });
 
@@ -168,6 +230,8 @@ describe("set-role script", () => {
         await expect(promisify(execFile)(process.execPath, [script, "nobody@example.com", "admin"], { env })).rejects.toMatchObject({
             stderr: expect.stringMatching(/No account/),
         });
+        await promisify(execFile)(process.execPath, [script, "first@example.com", "superadmin"], { env });
+        expect((await User.findOne({ email: "first@example.com" })).role).toBe("superadmin");
         await expect(promisify(execFile)(process.execPath, [script, "first@example.com", "owner"], { env })).rejects.toMatchObject({
             stderr: expect.stringMatching(/Usage/),
         });

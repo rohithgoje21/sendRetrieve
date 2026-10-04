@@ -1,13 +1,14 @@
 import { useDeferredValue, useState, type FormEvent, type ReactNode } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, BadgeCheck, Ban, HardDrive, Search, Share2, ShieldCheck, Upload, Users } from "lucide-react";
+import { Activity, BadgeCheck, Ban, Crown, HardDrive, Search, Share2, ShieldCheck, Upload, Users } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/inputs";
 import { Alert, Badge, Card, Skeleton } from "@/components/ui/feedback";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useSession } from "@/hooks/useSession";
 import { api } from "@/lib/api";
+import { can } from "@/lib/permissions";
 import { formatCode, formatDate, formatDateTime, formatSize, normalizeCodeInput, pluralize, stripCode } from "@/lib/format";
 import type { AdminShare, AdminStats, AdminUser, AdminUsersPage } from "@/lib/types";
 
@@ -57,7 +58,13 @@ function Stats() {
     );
 }
 
-type PendingChange = { user: AdminUser; change: { role?: "user" | "admin"; disabled?: boolean }; title: string; description: string };
+// role/disabled: PATCH the user; logout: log them out on every device.
+type PendingChange = {
+    user: AdminUser;
+    change: { role?: "user" | "admin"; disabled?: boolean; logout?: true };
+    title: string;
+    description: string;
+};
 
 function UsersTable() {
     const { user: me } = useSession();
@@ -74,13 +81,18 @@ function UsersTable() {
     });
 
     const update = useMutation({
-        mutationFn: ({ user, change }: PendingChange) => api(`/api/admin/users/${user.id}`, { method: "PATCH", body: change }),
+        mutationFn: ({ user, change }: PendingChange) =>
+            change.logout
+                ? api(`/api/admin/users/${user.id}/logout`, { method: "POST" })
+                : api(`/api/admin/users/${user.id}`, { method: "PATCH", body: change }),
         onSuccess: (_, { user, change }) => {
             setPending(null);
             toast.success(
-                change.disabled !== undefined
-                    ? `${user.email} ${change.disabled ? "disabled" : "enabled"}`
-                    : `${user.email} is now ${change.role === "admin" ? "an admin" : "a regular user"}`
+                change.logout
+                    ? `${user.email} was logged out everywhere`
+                    : change.disabled !== undefined
+                      ? `${user.email} ${change.disabled ? "disabled" : "enabled"}`
+                      : `${user.email} is now ${change.role === "admin" ? "an admin" : "a regular user"}`
             );
             queryClient.invalidateQueries({ queryKey: adminKey });
         },
@@ -90,12 +102,19 @@ function UsersTable() {
     const ask = (user: AdminUser, change: PendingChange["change"]) => {
         if (change.disabled === true) {
             setPending({ user, change, title: `Disable ${user.email}?`, description: "They'll be logged out everywhere and can't log in until you enable the account again. Their shares keep working." });
+        } else if (change.logout) {
+            setPending({ user, change, title: `Log ${user.email} out everywhere?`, description: "Every device they're logged in on will have to log in again. Useful when an account may be compromised." });
         } else if (change.role === "admin") {
-            setPending({ user, change, title: `Make ${user.email} an admin?`, description: "Admins can see site statistics, disable accounts and remove any share." });
+            setPending({ user, change, title: `Make ${user.email} an admin?`, description: "Admins can see site statistics, manage regular users, remove any share and replay failed background jobs." });
         } else {
             update.mutate({ user, change, title: "", description: "" });
         }
     };
+
+    // Admins manage regular users; superadmins also manage admins; nobody
+    // changes a superadmin here (only the set-role script can).
+    const canManage = (user: AdminUser) =>
+        user.role === "superadmin" ? false : user.role === "admin" ? can(me, "users.roles") : can(me, "users.disable");
 
     const data = query.data;
     return (
@@ -132,6 +151,11 @@ function UsersTable() {
                                             <ShieldCheck className="size-3" aria-hidden /> Admin
                                         </Badge>
                                     )}
+                                    {user.role === "superadmin" && (
+                                        <Badge tone="warning">
+                                            <Crown className="size-3" aria-hidden /> Superadmin
+                                        </Badge>
+                                    )}
                                     {user.disabled && (
                                         <Badge tone="danger">
                                             <Ban className="size-3" aria-hidden /> Disabled
@@ -150,11 +174,18 @@ function UsersTable() {
                                     <span>joined {formatDate(user.createdAt)}</span>
                                 </p>
                             </div>
-                            {!self && (
-                                <div className="flex gap-2">
-                                    <Button variant="secondary" size="sm" onClick={() => ask(user, { role: user.role === "admin" ? "user" : "admin" })}>
-                                        {user.role === "admin" ? "Remove admin" : "Make admin"}
-                                    </Button>
+                            {!self && canManage(user) && (
+                                <div className="flex flex-wrap gap-2">
+                                    {can(me, "users.roles") && (
+                                        <Button variant="secondary" size="sm" onClick={() => ask(user, { role: user.role === "admin" ? "user" : "admin" })}>
+                                            {user.role === "admin" ? "Remove admin" : "Make admin"}
+                                        </Button>
+                                    )}
+                                    {can(me, "users.logout") && (
+                                        <Button variant="ghost" size="sm" onClick={() => ask(user, { logout: true })}>
+                                            Log out
+                                        </Button>
+                                    )}
                                     <Button
                                         variant={user.disabled ? "secondary" : "ghost"}
                                         size="sm"
@@ -193,8 +224,8 @@ function UsersTable() {
                 open={pending !== null}
                 title={pending?.title ?? ""}
                 description={pending?.description}
-                confirmLabel={pending?.change.disabled ? "Disable account" : "Confirm"}
-                destructive={pending?.change.disabled === true}
+                confirmLabel={pending?.change.disabled ? "Disable account" : pending?.change.logout ? "Log out everywhere" : "Confirm"}
+                destructive={pending?.change.disabled === true || pending?.change.logout === true}
                 busy={update.isPending}
                 onConfirm={() => pending && update.mutate(pending)}
                 onCancel={() => setPending(null)}

@@ -115,13 +115,15 @@ const createShare = async (target, fields = {}, files = [], { upload = true, com
 const useTestDatabase = () => {
     let mongo;
 
+    // Starting MongoDB can be slow on a busy machine (or CI runner), with many
+    // test files starting theirs at once: allow it a minute.
     beforeAll(async () => {
-        mongo = await MongoMemoryServer.create();
+        mongo = await MongoMemoryServer.create({ instance: { launchTimeout: 60_000 } });
         await mongoose.connect(mongo.getUri());
         await Promise.all(Object.values(mongoose.models).map((m) => m.syncIndexes()));
         // Workers without the scheduler: tests run the sweeps themselves.
         await startWorkers({ scheduler: false });
-    });
+    }, 90_000);
 
     afterEach(async () => {
         await settle();

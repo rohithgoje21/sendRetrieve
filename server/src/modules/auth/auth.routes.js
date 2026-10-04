@@ -4,6 +4,7 @@ const config = require("../../config");
 const User = require("../users/user.model");
 const schemas = require("./auth.schemas");
 const { requestEmail } = require("../notifications/emails");
+const { publish } = require("../../infrastructure/queue");
 const { HttpError } = require("../../shared/errors");
 const { validateBody } = require("../../shared/validate");
 const { limiter } = require("../../shared/rateLimit");
@@ -11,13 +12,7 @@ const { baseUrl } = require("../../shared/urls");
 const { hashToken, randomToken } = require("../../shared/crypto");
 const { requireAuth } = require("./middleware");
 const { createRealtimeToken } = require("../realtime/realtimeTokens");
-const {
-    issueSession,
-    clearSession,
-    rotateSession,
-    revokeSession,
-    revokeAllSessions,
-} = require("./sessions");
+const { startSession, clearSession, rotateSession, revokeSession, revokeAllSessions } = require("./sessions");
 
 const VERIFY_EMAIL = "verify-email";
 
@@ -62,7 +57,7 @@ const createAuthRouter = (ctx) => {
             await sendVerificationCode(ctx, user).catch((err) =>
                 req.log.error({ err, event: "email.failed", userId: user._id }, "Failed to send verification code")
             );
-            await issueSession(req, res, user);
+            await startSession(req, res, user);
             res.status(201).json({ user: user.toPublic() });
         }
     );
@@ -95,8 +90,18 @@ const createAuthRouter = (ctx) => {
                     code: "account_disabled",
                 });
             }
-            req.log.info({ event: "auth.login", userId: user._id }, "Logged in");
-            await issueSession(req, res, user);
+            const { session, newDevice } = await startSession(req, res, user);
+            req.log.info({ event: "auth.login", userId: user._id, newDevice }, "Logged in");
+            // The notification worker alerts the user to logins from new devices.
+            await publish("auth.login", {
+                userId: String(user._id),
+                sessionId: session.familyId,
+                newDevice,
+                device: session.device,
+                ipHint: session.ipHint,
+                at: session.createdAt,
+                accountUrl: `${baseUrl(req)}/account`,
+            });
             res.json({ user: user.toPublic() });
         }
     );
@@ -114,6 +119,7 @@ const createAuthRouter = (ctx) => {
         }
     );
 
+    // Logs out this browser (other devices: /api/me/sessions).
     router.post("/logout", async (req, res) => {
         await revokeSession(req);
         clearSession(req, res);
@@ -208,9 +214,9 @@ const createAuthRouter = (ctx) => {
             user.passwordResetExpiresAt = null;
             await user.save();
 
-            await revokeAllSessions(user);
+            await revokeAllSessions(user, "password_changed");
             req.log.info({ event: "auth.password_reset", userId: user._id }, "Password reset");
-            await issueSession(req, res, user);
+            await startSession(req, res, user);
             res.json({ user: user.toPublic() });
         }
     );

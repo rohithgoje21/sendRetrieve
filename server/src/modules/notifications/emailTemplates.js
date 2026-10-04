@@ -5,7 +5,24 @@
 const escapeHtml = (s) =>
     String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
+const formatTime = (iso) =>
+    new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }) + " UTC";
+
 const templates = {
+    "new-device-login": ({ name, device, ipHint, at, accountUrl }) => ({
+        subject: "New login to your sendRetrieve account",
+        text:
+            `Hi ${name},\n\n` +
+            `Your account was just logged in to from a device it hasn't used before:\n\n` +
+            `  ${device}${ipHint ? ` (network ${ipHint})` : ""}\n  ${formatTime(at)}\n\n` +
+            `If this was you, there's nothing to do. If not, change your password and log out the devices you don't recognize:\n\n${accountUrl}`,
+        html:
+            `<p>Hi ${escapeHtml(name)},</p>` +
+            `<p>Your account was just logged in to from a device it hasn't used before:</p>` +
+            `<p><strong>${escapeHtml(device)}</strong>${ipHint ? ` (network ${escapeHtml(ipHint)})` : ""}<br>${escapeHtml(formatTime(at))}</p>` +
+            `<p>If this was you, there's nothing to do. If not, <a href="${escapeHtml(accountUrl)}">change your password and log out the devices you don't recognize</a>.</p>`,
+    }),
+
     "password-reset": ({ name, link, minutes }) => ({
         subject: "Reset your sendRetrieve password",
         text:

@@ -2,6 +2,7 @@ import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { appSocket } from "@/test/fakeSocket";
 import { guestSession, inHours, mockApi, renderApp, testConfig, testUser } from "@/test/utils";
+import { ADMIN_PERMISSIONS } from "@/lib/permissions";
 import type { AdminStats, AdminUser } from "@/lib/types";
 
 const readyShare = {
@@ -161,8 +162,18 @@ describe("admin", () => {
         storage: { bytes: 5 * 1024 * 1024, files: 6 },
         activity: { views: 40, downloads: 15 },
     };
-    const grace: AdminUser = { id: "u2", email: "grace@example.com", name: "Grace", role: "user", emailVerified: true, createdAt: inHours(-48), disabled: false, activeShares: 3 };
-    const admin = { ...testUser, role: "admin" as const };
+    const grace: AdminUser = {
+        id: "u2",
+        email: "grace@example.com",
+        name: "Grace",
+        role: "user",
+        permissions: [],
+        emailVerified: true,
+        createdAt: inHours(-48),
+        disabled: false,
+        activeShares: 3,
+    };
+    const admin = { ...testUser, role: "admin" as const, permissions: ADMIN_PERMISSIONS };
 
     test("regular users can't see the admin page", async () => {
         mockApi({ "GET /api/auth/me": [200, { user: testUser }], "GET /api/auth/realtime-token": [200, { token: "t" }] });

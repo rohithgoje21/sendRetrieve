@@ -1,12 +1,25 @@
 // Shapes of the API's JSON responses.
 
-export type Role = "user" | "admin";
+export type Role = "user" | "admin" | "superadmin";
+
+// What a role allows (see server/src/modules/auth/permissions.js).
+export type Permission =
+    | "admin.access"
+    | "users.read"
+    | "users.disable"
+    | "users.logout"
+    | "users.roles"
+    | "shares.moderate"
+    | "queues.read"
+    | "queues.replay"
+    | "queues.purge";
 
 export interface User {
     id: string;
     email: string;
     name: string;
     role: Role;
+    permissions: Permission[];
     emailVerified: boolean;
     createdAt: string;
 }
@@ -195,6 +208,18 @@ export interface ShareBlockedEvent {
 export interface WatchedShareState {
     status: "uploading" | "processing" | "ready" | "ended";
     endedReason: EndedReason | null;
+}
+
+// A browser or device logged in to the account (GET /api/me/sessions).
+export interface DeviceSession {
+    id: string;
+    // This browser
+    current: boolean;
+    device: { browser: string | null; os: string | null; type: "desktop" | "mobile" | "tablet" | "unknown"; label: string };
+    // Network part of the address only, e.g. "203.0.113.*"
+    ipHint: string | null;
+    createdAt: string;
+    lastSeenAt: string;
 }
 
 // Admin dashboard

@@ -1,6 +1,5 @@
 const mongoose = require("mongoose");
-
-const ROLES = ["user", "admin"];
+const { ROLES, permissionsFor } = require("../auth/permissions");
 
 const userSchema = new mongoose.Schema(
     {
@@ -27,6 +26,8 @@ userSchema.methods.toPublic = function () {
         email: this.email,
         name: this.name,
         role: this.role ?? "user",
+        // What the role allows (the client shows or hides features with it)
+        permissions: permissionsFor(this.role ?? "user"),
         emailVerified: Boolean(this.emailVerifiedAt),
         createdAt: this.createdAt,
     };

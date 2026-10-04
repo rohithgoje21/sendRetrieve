@@ -1,7 +1,10 @@
-// Gives a user a role, e.g. to create the first admin:
+// Gives a user a role, e.g. to create the first superadmin (who can then
+// manage admins from the admin page):
 //
-//   npm run set-role -w server -- ada@example.com admin
-//   docker compose exec app node scripts/set-role.js ada@example.com admin
+//   npm run set-role -w server -- ada@example.com superadmin
+//   docker compose exec app node scripts/set-role.js ada@example.com superadmin
+//
+// The only way to change a superadmin's role.
 //
 // Uses the same MONGODB_URI as the server (server/.env or the environment).
 

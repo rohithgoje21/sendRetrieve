@@ -7,7 +7,8 @@ const { HttpError } = require("../../shared/errors");
 const { validateBody } = require("../../shared/validate");
 const { normalizeCode } = require("../shares/codes");
 const { baseUrl } = require("../../shared/urls");
-const { requireAuth, requireRole } = require("../auth/middleware");
+const { requireAuth, authorize } = require("../auth/middleware");
+const { can } = require("../auth/permissions");
 const { revokeAllSessions } = require("../auth/sessions");
 const { liveFilter, serializeOwnedShare, shareStatus, endShares, discardShares } = require("../shares/shares.service");
 const { getBus, isQueue } = require("../../infrastructure/queue");
@@ -25,11 +26,13 @@ const serializeUser = (user, activeShares = 0) => ({
     activeShares,
 });
 
-// /api/admin: site-wide stats, user management and share moderation, for
-// users with the "admin" role. Grant it with: npm run set-role -w server -- <email> admin
+// /api/admin: site-wide stats, user management, share moderation and
+// background jobs, for admins and superadmins (each route names the
+// permission it needs; see auth/permissions.js). Make the first superadmin
+// with: npm run set-role -w server -- <email> superadmin
 const createAdminRouter = () => {
     const router = express.Router();
-    router.use(requireAuth, requireRole("admin"));
+    router.use(requireAuth, authorize("admin.access"));
 
     router.get("/stats", async (req, res) => {
         const now = Date.now();
@@ -39,7 +42,7 @@ const createAdminRouter = () => {
                 User.countDocuments(),
                 User.countDocuments({ emailVerifiedAt: { $ne: null } }),
                 User.countDocuments({ disabledAt: { $ne: null } }),
-                User.countDocuments({ role: "admin" }),
+                User.countDocuments({ role: { $in: ["admin", "superadmin"] } }),
                 User.countDocuments({ createdAt: { $gte: new Date(now - 7 * DAY_MS) } }),
                 Share.countDocuments(live),
                 Share.countDocuments({ uploadPending: true }),
@@ -73,7 +76,7 @@ const createAdminRouter = () => {
         });
     });
 
-    router.get("/users", async (req, res) => {
+    router.get("/users", authorize("users.read"), async (req, res) => {
         const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
         const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 100) : "";
         const filter = search
@@ -99,7 +102,10 @@ const createAdminRouter = () => {
         });
     });
 
-    router.patch("/users/:id", validateBody(schemas.updateUser), async (req, res) => {
+    // Who may change whom: admins manage regular users; superadmins also
+    // manage admins and roles; superadmins themselves only change through
+    // scripts/set-role.js.
+    const findManageableUser = async (req) => {
         if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, "User not found");
         if (req.user._id.equals(req.params.id)) {
             // Guards against an admin locking everyone (themselves included) out.
@@ -107,19 +113,37 @@ const createAdminRouter = () => {
         }
         const user = await User.findById(req.params.id);
         if (!user) throw new HttpError(404, "User not found");
+        if (user.role === "superadmin") throw new HttpError(403, "Superadmin accounts can't be changed here");
+        if (user.role === "admin" && !can(req.user, "users.roles")) {
+            throw new HttpError(403, "Only a superadmin can manage admins");
+        }
+        return user;
+    };
 
+    router.patch("/users/:id", authorize("users.disable"), validateBody(schemas.updateUser), async (req, res) => {
         const { role, disabled } = req.body;
+        if (role !== undefined && !can(req.user, "users.roles")) throw new HttpError(403, "Only a superadmin can change roles");
+        const user = await findManageableUser(req);
+
         if (role !== undefined) user.role = role;
         if (disabled !== undefined) user.disabledAt = disabled ? (user.disabledAt ?? new Date()) : null;
         await user.save();
         // Disabling logs them out everywhere, right away.
-        if (disabled) await revokeAllSessions(user);
+        if (disabled) await revokeAllSessions(user, "disabled");
 
         req.log.info(
             { event: "admin.user_updated", targetUserId: user._id, changes: { role, disabled } },
             "Admin updated a user"
         );
         res.json({ user: serializeUser(user) });
+    });
+
+    // Logs a user out on every device (e.g. a compromised account).
+    router.post("/users/:id/logout", authorize("users.logout"), async (req, res) => {
+        const user = await findManageableUser(req);
+        await revokeAllSessions(user, "revoked");
+        req.log.info({ event: "admin.user_logged_out", targetUserId: user._id }, "Admin logged a user out everywhere");
+        res.status(204).end();
     });
 
     // Look up any share by code, for moderation. Metadata only: an admin
@@ -131,7 +155,7 @@ const createAdminRouter = () => {
         return share;
     };
 
-    router.get("/shares/:code", async (req, res) => {
+    router.get("/shares/:code", authorize("shares.moderate"), async (req, res) => {
         const share = await findShare(req);
         const owner = share.ownerId ? await User.findById(share.ownerId) : null;
         const { textPreview: _textPreview, ...summary } = serializeOwnedShare(share, baseUrl(req));
@@ -146,7 +170,7 @@ const createAdminRouter = () => {
     });
 
     // Takes a share down immediately. The owner sees it as "removed".
-    router.delete("/shares/:code", async (req, res) => {
+    router.delete("/shares/:code", authorize("shares.moderate"), async (req, res) => {
         const share = await findShare(req);
         if (share.uploadPending) await discardShares([share]);
         else if (shareStatus(share) === "active") await endShares([share], "removed");
@@ -160,7 +184,7 @@ const createAdminRouter = () => {
 
     // Queue depths, consumers and dead-lettered messages, plus the state of
     // the circuit breakers in front of outside services.
-    router.get("/queues", async (req, res) => {
+    router.get("/queues", authorize("queues.read"), async (req, res) => {
         const bus = getBus();
         res.set("Cache-Control", "no-store");
         res.json({ broker: bus.kind, queues: await bus.stats(), circuitBreakers: [emailBreaker.snapshot(), scannerBreaker.snapshot()] });
@@ -172,7 +196,7 @@ const createAdminRouter = () => {
     };
 
     // Messages that failed every retry, with their last error.
-    router.get("/queues/:queue/dead-letters", async (req, res) => {
+    router.get("/queues/:queue/dead-letters", authorize("queues.read"), async (req, res) => {
         const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
         res.set("Cache-Control", "no-store");
         res.json({ messages: await getBus().peekDeadLetters(queueParam(req), limit) });
@@ -180,14 +204,14 @@ const createAdminRouter = () => {
 
     // After fixing the cause (e.g. the email provider is back), send the
     // dead-lettered messages through again.
-    router.post("/queues/:queue/dead-letters/replay", async (req, res) => {
+    router.post("/queues/:queue/dead-letters/replay", authorize("queues.replay"), async (req, res) => {
         const queue = queueParam(req);
         const replayed = await getBus().replayDeadLetters(queue);
         req.log.info({ event: "admin.dead_letters_replayed", queue, replayed }, "Dead letters replayed");
         res.json({ replayed });
     });
 
-    router.delete("/queues/:queue/dead-letters", async (req, res) => {
+    router.delete("/queues/:queue/dead-letters", authorize("queues.purge"), async (req, res) => {
         const queue = queueParam(req);
         const purged = await getBus().purgeDeadLetters(queue);
         req.log.warn({ event: "admin.dead_letters_purged", queue, purged }, "Dead letters purged");

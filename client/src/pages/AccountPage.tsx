@@ -2,19 +2,21 @@ import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { toast } from "sonner";
-import { BadgeCheck } from "lucide-react";
+import { BadgeCheck, LogOut, Monitor, MonitorSmartphone, Smartphone, Tablet } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Input, PasswordInput } from "@/components/ui/inputs";
-import { Alert, Badge, Card } from "@/components/ui/feedback";
+import { Alert, Badge, Card, Skeleton } from "@/components/ui/feedback";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useSession, useSetSession } from "@/hooks/useSession";
 import { api } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatRelative } from "@/lib/format";
+import { devicesKey } from "@/lib/queryClient";
 import { cn, showServerError } from "@/lib/utils";
-import type { User } from "@/lib/types";
+import type { DeviceSession, User } from "@/lib/types";
 
 function Section({ title, description, children, danger }: { title: string; description?: string; children: ReactNode; danger?: boolean }) {
     return (
@@ -109,6 +111,108 @@ function PasswordForm() {
     );
 }
 
+const DEVICE_ICONS = { desktop: Monitor, mobile: Smartphone, tablet: Tablet, unknown: MonitorSmartphone };
+
+// Where the account is logged in, and logging devices out.
+function Devices() {
+    const queryClient = useQueryClient();
+    const navigate = useNavigate();
+    const setSession = useSetSession();
+    const [confirmAll, setConfirmAll] = useState(false);
+    const { data, error } = useQuery({
+        queryKey: devicesKey,
+        queryFn: () => api<{ sessions: DeviceSession[] }>("/api/me/sessions"),
+        refetchInterval: 60_000,
+    });
+    const refresh = () => queryClient.invalidateQueries({ queryKey: devicesKey });
+
+    const logOut = useMutation({
+        mutationFn: (session: DeviceSession) => api(`/api/me/sessions/${session.id}`, { method: "DELETE" }),
+        onSuccess: (_, session) => {
+            toast.success(`Logged out ${session.device.label}`);
+            refresh();
+        },
+        onError: (err) => toast.error(err.message),
+    });
+    const logOutOthers = useMutation({
+        mutationFn: () => api<{ revoked: number }>("/api/me/sessions/revoke-others", { method: "POST" }),
+        onSuccess: ({ revoked }) => {
+            toast.success(revoked === 1 ? "Logged out 1 other device" : `Logged out ${revoked} other devices`);
+            refresh();
+        },
+        onError: (err) => toast.error(err.message),
+    });
+    const logOutEverywhere = useMutation({
+        mutationFn: () => api("/api/me/sessions/revoke-all", { method: "POST" }),
+        onSuccess: () => {
+            setSession(null);
+            toast.success("Logged out everywhere");
+            navigate("/login", { replace: true });
+        },
+        onError: (err) => toast.error(err.message),
+    });
+
+    if (error) return <Alert tone="error">{error.message}</Alert>;
+    if (!data) return <Skeleton className="h-28 w-full" />;
+    const others = data.sessions.filter((s) => !s.current);
+
+    return (
+        <div className="space-y-4">
+            <ul className="divide-y divide-zinc-200 dark:divide-zinc-800" aria-label="Logged-in devices">
+                {data.sessions.map((session) => {
+                    const Icon = DEVICE_ICONS[session.device.type] ?? MonitorSmartphone;
+                    return (
+                        <li key={session.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                            <Icon className="size-5 shrink-0 text-zinc-500" aria-hidden />
+                            <div className="min-w-0 flex-1">
+                                <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                                    {session.device.label}
+                                    {session.current && <Badge tone="success">This device</Badge>}
+                                </p>
+                                <p className="text-xs text-zinc-500">
+                                    {session.current ? "Active now" : `Last active ${formatRelative(session.lastSeenAt)}`} · logged in{" "}
+                                    {formatDate(session.createdAt)}
+                                    {session.ipHint && <> · network {session.ipHint}</>}
+                                </p>
+                            </div>
+                            {!session.current && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    loading={logOut.isPending && logOut.variables?.id === session.id}
+                                    onClick={() => logOut.mutate(session)}
+                                    aria-label={`Log out ${session.device.label}`}
+                                >
+                                    Log out
+                                </Button>
+                            )}
+                        </li>
+                    );
+                })}
+            </ul>
+            <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" disabled={others.length === 0} loading={logOutOthers.isPending} onClick={() => logOutOthers.mutate()}>
+                    Log out other devices
+                </Button>
+                <Button variant="ghost" onClick={() => setConfirmAll(true)}>
+                    <LogOut aria-hidden />
+                    Log out everywhere
+                </Button>
+            </div>
+            <ConfirmDialog
+                open={confirmAll}
+                title="Log out everywhere?"
+                description="Every device, this one included, will need to log in again."
+                confirmLabel="Log out everywhere"
+                destructive
+                busy={logOutEverywhere.isPending}
+                onConfirm={() => logOutEverywhere.mutate()}
+                onCancel={() => setConfirmAll(false)}
+            />
+        </div>
+    );
+}
+
 const deleteSchema = z.object({ password: z.string().min(1, "Enter your password") });
 
 function DeleteAccount() {
@@ -171,6 +275,9 @@ export default function AccountPage() {
             </Section>
             <Section title="Password" description="Changing it logs you out everywhere except this browser.">
                 <PasswordForm />
+            </Section>
+            <Section title="Devices" description="Where your account is logged in. Log out any device you don't recognize, then change your password.">
+                <Devices />
             </Section>
             <Section title="Delete account" description="Permanently delete your account and all your shares." danger>
                 <DeleteAccount />

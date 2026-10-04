@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Navigate, Outlet, useLocation, useSearchParams } from "react-router";
 import { useSession } from "@/hooks/useSession";
+import { can } from "@/lib/permissions";
 import { safeNextPath } from "@/lib/utils";
 import { PageSpinner } from "./ui/feedback";
 
@@ -32,11 +33,11 @@ export function GuestOnly() {
     return <Outlet />;
 }
 
-// Admin pages: signed-in users with the admin role only.
+// Admin pages: signed-in admins and superadmins only.
 export function RequireAdmin() {
     const { user, isLoading } = useSession();
     if (isLoading) return <PageSpinner />;
-    if (user?.role !== "admin") return <NotAllowed />;
+    if (!can(user, "admin.access")) return <NotAllowed />;
     return <Outlet />;
 }
 

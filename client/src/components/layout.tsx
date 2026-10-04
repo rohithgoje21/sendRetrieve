@@ -5,6 +5,7 @@ import { ChevronDown, FolderOpen, LogOut, MailWarning, Moon, Settings, ShieldChe
 import { useLogout, useSession } from "@/hooks/useSession";
 import { useRealtimeUpdates } from "@/hooks/useRealtime";
 import { useTheme } from "@/hooks/useTheme";
+import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { User } from "@/lib/types";
 import { PageSpinner } from "./ui/feedback";
@@ -101,7 +102,7 @@ function UserMenu({ user }: { user: User }) {
                     <Link role="menuitem" to="/account" onClick={close} className={itemClass}>
                         <Settings /> Account settings
                     </Link>
-                    {user.role === "admin" && (
+                    {can(user, "admin.access") && (
                         <Link role="menuitem" to="/admin" onClick={close} className={itemClass}>
                             <ShieldCheck /> Admin
                         </Link>
