@@ -4,12 +4,14 @@ const { storage } = require("../infrastructure/storage");
 const { publish } = require("../infrastructure/queue");
 const scanner = require("../infrastructure/clamav");
 const { endShares, discardShares, fileKeys } = require("../modules/shares/shares.service");
+const { queueWeeklySummaries } = require("../modules/notifications/weeklySummary");
 
 // Periodic jobs. With several worker instances, each sweep is guarded by a
 // lock in Redis so only one instance runs it per interval.
 //
 //   every minute   end expired shares and discard abandoned uploads;
-//                  re-queue file deletions and scans that seem to have been lost
+//                  re-queue file deletions and scans that seem to have been lost;
+//                  once a week, queue the users' weekly summaries
 //   every hour     delete stored files that no share references (orphans),
 //                  and parts of uploads abandoned long ago (disk storage)
 
@@ -87,13 +89,14 @@ const deleteOrphanFiles = async ({ minAgeMs = ORPHAN_MIN_AGE_MS } = {}) => {
     return orphans.length;
 };
 
-const startScheduler = ({ locks, log }) => {
+const startScheduler = ({ locks, kv, log }) => {
     const sweep = () =>
         locks
             .runExclusive("sweep", config.cleanupIntervalMs, async () => {
                 const ended = await deleteExpiredShares();
                 const requeued = (await requeueStuckDeletions()) + (await requeueStuckProcessing());
-                if (ended || requeued) log.info({ event: "sweep.completed", ended, requeued }, "Sweep completed");
+                const summaries = await queueWeeklySummaries({ kv });
+                if (ended || requeued || summaries) log.info({ event: "sweep.completed", ended, requeued, summaries }, "Sweep completed");
             })
             .catch((err) => log.error({ err, event: "sweep.failed" }, "Sweep failed"));
 

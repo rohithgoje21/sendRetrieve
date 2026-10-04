@@ -1,5 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
 import { FakeSocket, fakeSockets } from "./fakeSocket";
+
+// Pages load lazily; with the whole suite running in parallel that can take
+// more than the default second.
+configure({ asyncUtilTimeout: 3000 });
 
 // No real Socket.IO connections in tests: see fakeSocket.ts.
 vi.mock("socket.io-client", () => ({
@@ -11,6 +16,7 @@ vi.mock("socket.io-client", () => ({
 }));
 
 // jsdom doesn't implement these browser APIs.
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
 if (!HTMLDialogElement.prototype.showModal) {
     HTMLDialogElement.prototype.showModal = function () {
         this.open = true;

@@ -5,6 +5,8 @@ export const sessionKey = ["session"] as const;
 export const sharesKey = ["shares"] as const;
 export const configKey = ["config"] as const;
 export const devicesKey = ["devices"] as const;
+export const notificationsKey = ["notifications"] as const;
+export const notificationSettingsKey = ["notification-settings"] as const;
 
 export const createQueryClient = () => {
     const client: QueryClient = new QueryClient({

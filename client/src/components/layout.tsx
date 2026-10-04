@@ -8,6 +8,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { User } from "@/lib/types";
+import { NotificationBell } from "./NotificationBell";
 import { PageSpinner } from "./ui/feedback";
 import { buttonClasses } from "./ui/styles";
 
@@ -141,6 +142,7 @@ function Header() {
                                 <FolderOpen aria-hidden />
                                 <span className="max-sm:sr-only">My shares</span>
                             </NavLink>
+                            <NotificationBell />
                             <UserMenu user={user} />
                         </>
                     ) : (

@@ -12,6 +12,7 @@ const { createDownloadsRouter } = require("./modules/files/downloads.routes");
 const { createHealthRouter } = require("./modules/system/health.routes");
 const { createConfigRouter } = require("./modules/system/config.routes");
 const { createAdminRouter } = require("./modules/admin/admin.routes");
+const { createNotificationsRouter } = require("./modules/notifications/notifications.routes");
 const { createUploadsRouter } = require("./modules/files/uploads.routes");
 const { storage } = require("./infrastructure/storage");
 const { createKeyValueStore } = require("./infrastructure/kv");
@@ -120,6 +121,7 @@ const createApp = ({ rateLimit = true, redis = null, logger } = {}) => {
     app.use("/api/me/shares", createMySharesRouter(ctx));
     app.use("/api/me", createUsersRouter(ctx));
     app.use("/api/admin", createAdminRouter(ctx));
+    app.use("/api/notifications", createNotificationsRouter(ctx));
     app.use("/api", createConfigRouter());
     app.use("/api", createSharesRouter(ctx));
     app.use("/api", createDownloadsRouter(ctx));

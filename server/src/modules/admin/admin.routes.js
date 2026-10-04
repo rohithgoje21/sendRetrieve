@@ -14,6 +14,7 @@ const { liveFilter, serializeOwnedShare, shareStatus, endShares, discardShares }
 const { getBus, isQueue } = require("../../infrastructure/queue");
 const { emailBreaker } = require("../../infrastructure/mailer");
 const { scannerBreaker } = require("../../infrastructure/clamav");
+const { pushBreaker } = require("../../infrastructure/webPush");
 
 const PAGE_SIZE = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -187,7 +188,7 @@ const createAdminRouter = () => {
     router.get("/queues", authorize("queues.read"), async (req, res) => {
         const bus = getBus();
         res.set("Cache-Control", "no-store");
-        res.json({ broker: bus.kind, queues: await bus.stats(), circuitBreakers: [emailBreaker.snapshot(), scannerBreaker.snapshot()] });
+        res.json({ broker: bus.kind, queues: await bus.stats(), circuitBreakers: [emailBreaker.snapshot(), scannerBreaker.snapshot(), pushBreaker.snapshot()] });
     });
 
     const queueParam = (req) => {

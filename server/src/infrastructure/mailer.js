@@ -18,11 +18,12 @@ const breaker = new CircuitBreaker("email", {
         log[state === "open" ? "error" : "info"]({ event: "email.circuit", state, previous }, `Email circuit ${state}`),
 });
 
-const deliver = async ({ to, subject, text, html }) => {
+// `headers`: extra email headers, e.g. List-Unsubscribe.
+const deliver = async ({ to, subject, text, html, headers }) => {
     const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { Authorization: `Bearer ${config.email.resendApiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ from: config.email.from, to, subject, text, html }),
+        body: JSON.stringify({ from: config.email.from, to, subject, text, html, ...(headers ? { headers } : {}) }),
     });
     if (!res.ok) throw new Error(`Resend returned ${res.status}: ${await res.text()}`);
 };

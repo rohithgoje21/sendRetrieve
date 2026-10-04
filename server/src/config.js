@@ -173,6 +173,26 @@ const config = {
     // Image thumbnails, made by the processing worker.
     thumbnails: { width: 480 },
 
+    notifications: {
+        // Web Push: browser notifications, even with the site closed. Off
+        // unless both keys are set; make a pair with: npm run vapid-keys -w server
+        vapid: {
+            publicKey: process.env.VAPID_PUBLIC_KEY || null,
+            privateKey: process.env.VAPID_PRIVATE_KEY || null,
+            // How push services can reach whoever runs this site.
+            subject: process.env.VAPID_SUBJECT || "mailto:admin@sendretrieve.invalid",
+        },
+        // Downloads of one share: merged into one in-app notification within
+        // this window, and emailed / pushed at most this often.
+        downloadCoalesceSeconds: 60 * 60,
+        downloadEmailCooldownSeconds: 60 * 60,
+        downloadPushCooldownSeconds: 10 * 60,
+        // In-app notifications are kept this long.
+        retentionDays: 90,
+        // The weekly summary goes out on this weekday (0 = Sunday) after this hour (UTC).
+        weeklySummary: { weekday: 1, hourUtc: 8 },
+    },
+
     // How often the scheduler looks for expired shares, abandoned uploads and
     // orphaned files (only one worker instance does it per interval).
     cleanupIntervalMs: 60 * 1000,

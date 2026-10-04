@@ -31,6 +31,11 @@ x-app-environment: &app-environment
   S3_CREATE_BUCKET: "true"
   # Uploaded files are scanned for malware before their share goes live.
   CLAMAV_HOST: clamav
+  # Browser notifications: off unless set (npm run vapid-keys -w server, then
+  # put both keys in a .env file next to this one).
+  VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+  VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+  VAPID_SUBJECT: ${VAPID_SUBJECT:-}
 
 x-depends-on-infrastructure: &depends-on-infrastructure
   mongo:

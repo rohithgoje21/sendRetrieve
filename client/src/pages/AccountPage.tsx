@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router";
+import { useEffect, useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -11,6 +11,7 @@ import { Field } from "@/components/ui/Field";
 import { Input, PasswordInput } from "@/components/ui/inputs";
 import { Alert, Badge, Card, Skeleton } from "@/components/ui/feedback";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { NotificationSettings } from "@/components/NotificationSettings";
 import { useSession, useSetSession } from "@/hooks/useSession";
 import { api } from "@/lib/api";
 import { formatDate, formatRelative } from "@/lib/format";
@@ -18,9 +19,21 @@ import { devicesKey } from "@/lib/queryClient";
 import { cn, showServerError } from "@/lib/utils";
 import type { DeviceSession, User } from "@/lib/types";
 
-function Section({ title, description, children, danger }: { title: string; description?: string; children: ReactNode; danger?: boolean }) {
+function Section({
+    id,
+    title,
+    description,
+    children,
+    danger,
+}: {
+    id?: string;
+    title: string;
+    description?: string;
+    children: ReactNode;
+    danger?: boolean;
+}) {
     return (
-        <Card className={cn("p-5 sm:p-6", danger && "border-red-200 dark:border-red-900/60")}>
+        <Card id={id} className={cn("scroll-mt-20 p-5 sm:p-6", danger && "border-red-200 dark:border-red-900/60")}>
             <h2 className={cn("text-lg font-semibold", danger && "text-red-700 dark:text-red-400")}>{title}</h2>
             {description && <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{description}</p>}
             <div className="mt-5">{children}</div>
@@ -264,6 +277,11 @@ function DeleteAccount() {
 
 export default function AccountPage() {
     const { user } = useSession();
+    const { hash } = useLocation();
+    // Links like /account#notifications go straight to that section.
+    useEffect(() => {
+        if (hash) document.getElementById(hash.slice(1))?.scrollIntoView();
+    }, [hash]);
     if (!user) return null; // guarded by <RequireAuth>
 
     return (
@@ -275,6 +293,9 @@ export default function AccountPage() {
             </Section>
             <Section title="Password" description="Changing it logs you out everywhere except this browser.">
                 <PasswordForm />
+            </Section>
+            <Section id="notifications" title="Notifications" description="What you hear about, and where: in the app, by email, or as browser notifications.">
+                <NotificationSettings />
             </Section>
             <Section title="Devices" description="Where your account is logged in. Log out any device you don't recognize, then change your password.">
                 <Devices />

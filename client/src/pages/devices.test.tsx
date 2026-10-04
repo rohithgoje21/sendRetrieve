@@ -26,6 +26,8 @@ describe("devices on the account page", () => {
         "GET /api/auth/me": [200, { user: testUser }] as [number, unknown],
         "GET /api/auth/realtime-token": [200, { token: "t" }] as [number, unknown],
         "GET /api/me/sessions": () => [200, { sessions }] as [number, unknown],
+        "GET /api/notifications": [200, { notifications: [], unread: 0, hasMore: false }] as [number, unknown],
+        "GET /api/notifications/preferences": [404, {}] as [number, unknown],
     });
 
     test("lists where the account is logged in, this device first", async () => {

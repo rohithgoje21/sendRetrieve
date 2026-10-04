@@ -101,6 +101,14 @@ const initRealtime = async (httpServer, { redis = null } = {}) => {
     return io;
 };
 
+// Sends `event` to every browser the user is signed in on (e.g. a new
+// in-app notification). Does nothing when real-time isn't running.
+const notifyUser = (userId, event, payload = {}) => {
+    const target = io ?? emitter;
+    if (!target) return;
+    target.to(`user:${userId}`).emit(event, { ...payload, at: new Date().toISOString() });
+};
+
 // For the worker process: its events go through Redis to the API instances,
 // which deliver them to the browsers connected there.
 const initRealtimeEmitter = (redis) => {
@@ -132,4 +140,4 @@ const closeRealtime = async () => {
     await Promise.all(clients.map((client) => client.close().catch(() => {})));
 };
 
-module.exports = { initRealtime, initRealtimeEmitter, notifyShare, closeRealtime };
+module.exports = { initRealtime, initRealtimeEmitter, notifyShare, notifyUser, closeRealtime };

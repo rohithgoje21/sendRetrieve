@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
+import { disablePush } from "@/lib/push";
 import { sessionKey, sharesKey } from "@/lib/queryClient";
 import type { User } from "@/lib/types";
 
@@ -33,7 +34,12 @@ export function useLogout() {
     const setSession = useSetSession();
     const navigate = useNavigate();
     return useMutation({
-        mutationFn: () => api("/api/auth/logout", { method: "POST" }),
+        mutationFn: async () => {
+            // Stop this browser's push notifications first (a shared computer
+            // shouldn't keep getting this account's notifications).
+            await disablePush().catch(() => {});
+            await api("/api/auth/logout", { method: "POST" });
+        },
         onSettled: () => {
             setSession(null);
             navigate("/");

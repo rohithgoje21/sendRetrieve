@@ -222,6 +222,45 @@ export interface DeviceSession {
     lastSeenAt: string;
 }
 
+// Notifications (the bell, and how each kind of event is delivered)
+export type NotificationEvent = "fileDownloaded" | "shareEnded" | "shareBlocked" | "newDevice" | "weeklySummary";
+
+export interface AppNotification {
+    id: string;
+    event: NotificationEvent;
+    title: string;
+    body: string | null;
+    // A page in the app, e.g. "/shares"
+    link: string | null;
+    read: boolean;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface NotificationsPage {
+    notifications: AppNotification[];
+    unread: number;
+    hasMore: boolean;
+}
+
+export interface ChannelChoices {
+    inApp: boolean;
+    email: boolean;
+    push: boolean;
+}
+
+export interface NotificationSettings {
+    preferences: Record<NotificationEvent, ChannelChoices>;
+    events: { key: NotificationEvent; label: string; security: boolean }[];
+    channels: { email: { verified: boolean }; push: { available: boolean; publicKey: string | null } };
+}
+
+// Socket.IO: a new (or updated) notification, and the unread count after it.
+export interface NotificationEventPayload {
+    notification: AppNotification;
+    unread: number;
+}
+
 // Admin dashboard
 export interface AdminStats {
     users: { total: number; verified: number; disabled: number; admins: number; newThisWeek: number };

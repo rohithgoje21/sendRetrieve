@@ -7,6 +7,7 @@ const { HttpError } = require("../../shared/errors");
 const { limiter } = require("../../shared/rateLimit");
 const { PREVIEWABLE_TYPES, liveFilter, NOT_FOUND_MESSAGE } = require("../shares/shares.service");
 const { notifyShare } = require("../realtime/realtime");
+const { publish } = require("../../infrastructure/queue");
 
 // GET /api/files/:token: a download link handed out when a share is opened.
 // Checks the share is still live, counts the download, then hands over the
@@ -45,11 +46,18 @@ const createDownloadsRouter = (ctx) => {
                     { $inc: { "files.$.downloads": 1 } },
                     { new: true, projection: { files: 1 } }
                 );
+                const downloads = updated?.files.id(file._id)?.downloads ?? file.downloads + 1;
                 req.log.info({ event: "file.downloaded", shareId: share._id, fileId: file._id }, "File downloaded");
-                notifyShare(share, "file:downloaded", {
-                    fileId: file._id,
+                notifyShare(share, "file:downloaded", { fileId: file._id, fileName: file.originalName, downloads });
+                // For the owner's notifications (and analytics).
+                await publish("file.downloaded", {
+                    shareId: String(share._id),
+                    code: share.code,
+                    ownerId: share.ownerId ? String(share.ownerId) : null,
+                    fileId: String(file._id),
                     fileName: file.originalName,
-                    downloads: updated?.files.id(file._id)?.downloads ?? file.downloads + 1,
+                    size: file.size,
+                    downloads,
                 });
             }
 

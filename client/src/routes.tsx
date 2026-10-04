@@ -18,6 +18,7 @@ const MySharesPage = lazy(() => import("@/pages/MySharesPage"));
 const AccountPage = lazy(() => import("@/pages/AccountPage"));
 const VerifyEmailPage = lazy(() => import("@/pages/VerifyEmailPage"));
 const AdminPage = lazy(() => import("@/pages/AdminPage"));
+const UnsubscribePage = lazy(() => import("@/pages/UnsubscribePage"));
 
 export const routes: RouteObject[] = [
     {
@@ -41,6 +42,7 @@ export const routes: RouteObject[] = [
             },
             { path: "forgot-password", element: <ForgotPasswordPage /> },
             { path: "reset-password", element: <ResetPasswordPage /> },
+            { path: "unsubscribe", element: <UnsubscribePage /> },
             {
                 element: <RequireAuth />,
                 children: [

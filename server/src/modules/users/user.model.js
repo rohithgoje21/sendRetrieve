@@ -14,6 +14,9 @@ const userSchema = new mongoose.Schema(
         // Embedded in access tokens; bumping it (on password change/reset or
         // when disabling) invalidates every access token issued before.
         sessionVersion: { type: Number, default: 0 },
+        // Which notifications to get, and how (see notifications/preferences.js);
+        // missing entries use the defaults.
+        notificationPreferences: { type: mongoose.Schema.Types.Mixed, default: {} },
         passwordResetTokenHash: { type: String, default: null },
         passwordResetExpiresAt: { type: Date, default: null },
     },
