@@ -17,6 +17,15 @@ const { PREVIEWABLE_TYPES, liveFilter, serializeFile, discardShares, NOT_FOUND_M
 const { notifyShare } = require("../realtime/realtime");
 const scanner = require("../../infrastructure/clamav");
 const { publish } = require("../../infrastructure/queue");
+const { visitorToken } = require("../analytics/visitors");
+
+// For statistics (the analytics worker): a share with its content in place.
+const publishCreated = (share) =>
+    publish("share.created", {
+        shareId: String(share._id),
+        ownerId: share.ownerId ? String(share.ownerId) : null,
+        files: share.files.map((f) => ({ size: f.size, mimeType: f.mimeType })),
+    });
 
 const UPLOAD_NOT_FOUND_MESSAGE = "This upload has expired or was already completed.";
 
@@ -292,6 +301,7 @@ const createSharesRouter = (ctx) => {
             if (!pending) {
                 logCreated(req, share);
                 notifyShare(share, "share:created");
+                await publishCreated(share);
             }
             res.status(201).json({
                 ...shareSummary(req, share),
@@ -342,6 +352,7 @@ const createSharesRouter = (ctx) => {
 
             logCreated(req, completed);
             await publish("share.uploaded", { shareId: String(completed._id), code: completed.code, scan: scanning });
+            await publishCreated(completed);
             if (!scanning) notifyShare(completed, "share:created");
             res.json({ ...shareSummary(req, completed), status: scanning ? "processing" : "ready" });
         }
@@ -474,6 +485,11 @@ const createSharesRouter = (ctx) => {
                 views: state.views,
                 maxViews: share.maxViews,
                 viewsRemaining: state.viewsRemaining,
+            });
+            await publish("share.opened", {
+                shareId: String(share._id),
+                ownerId: share.ownerId ? String(share.ownerId) : null,
+                visitor: visitorToken(req),
             });
 
             res.set("Cache-Control", "no-store");

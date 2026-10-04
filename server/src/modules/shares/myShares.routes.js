@@ -6,9 +6,48 @@ const { normalizeCode } = require("./codes");
 const { baseUrl } = require("../../shared/urls");
 const { requireAuth } = require("../auth/middleware");
 const { serializeOwnedShare, shareStatus, endShares } = require("./shares.service");
+const { PATTERNS } = require("../analytics/fileCategories");
 
 const PAGE_SIZE = 20;
 const STATUSES = ["active", "expired", "deleted"];
+
+const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Search and filters from the query string (all optional):
+//   q          text in a file name or the message, or (part of) the code
+//   kind       "files" | "text" (text-only shares)
+//   fileType   image | video | audio | document | archive: has such a file
+//   protected  "yes" | "no": password-protected or not
+const searchFilter = (query) => {
+    const and = [];
+    const q = typeof query.q === "string" ? query.q.trim().slice(0, 100) : "";
+    if (q) {
+        const contains = new RegExp(escapeRegex(q), "i");
+        const code = q.replace(/[\s-]/g, "").toUpperCase();
+        and.push({
+            $or: [
+                { "files.originalName": contains },
+                { text: contains },
+                ...(/^[A-Z0-9]{1,8}$/.test(code) ? [{ code: new RegExp(`^${code}`) }] : []),
+            ],
+        });
+    }
+    if (query.kind === "files") and.push({ "files.0": { $exists: true } });
+    if (query.kind === "text") and.push({ files: { $size: 0 } });
+    if (PATTERNS[query.fileType]) and.push({ files: { $elemMatch: { mimeType: PATTERNS[query.fileType] } } });
+    if (query.protected === "yes") and.push({ passwordHash: { $ne: null } });
+    if (query.protected === "no") and.push({ passwordHash: null });
+    return and.length ? { $and: and } : {};
+};
+
+const SORTS = {
+    newest: { createdAt: -1 },
+    oldest: { createdAt: 1 },
+    views: { views: -1, createdAt: -1 },
+    downloads: { totalDownloads: -1, createdAt: -1 },
+    size: { totalSize: -1, createdAt: -1 },
+    expiring: { expiresAt: 1 },
+};
 
 // Shares still uploading aren't listed: they appear once the upload completes
 // (or are cleaned up if it never does).
@@ -33,22 +72,36 @@ const createMySharesRouter = () => {
     const router = express.Router();
     router.use(requireAuth);
 
+    // A page of shares in one tab (active, expired, deleted), searched,
+    // filtered and sorted; counts per tab follow the same search.
     router.get("/", async (req, res) => {
         const status = STATUSES.includes(req.query.status) ? req.query.status : "active";
         const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+        const sort = SORTS[req.query.sort] ? req.query.sort : "newest";
+        const search = searchFilter(req.query);
+        const match = (s) => ({ $and: [statusFilter(req.user._id, s), search] });
 
         const [shares, ...counts] = await Promise.all([
-            Share.find(statusFilter(req.user._id, status))
-                .sort({ createdAt: -1 })
-                .skip((page - 1) * PAGE_SIZE)
-                .limit(PAGE_SIZE + 1),
-            ...STATUSES.map((s) => Share.countDocuments(statusFilter(req.user._id, s))),
+            Share.aggregate([
+                { $match: match(status) },
+                {
+                    $addFields: {
+                        totalSize: { $sum: "$files.size" },
+                        totalDownloads: { $sum: "$files.downloads" },
+                    },
+                },
+                { $sort: SORTS[sort] },
+                { $skip: (page - 1) * PAGE_SIZE },
+                { $limit: PAGE_SIZE + 1 },
+            ]),
+            ...STATUSES.map((s) => Share.countDocuments(match(s))),
         ]);
 
         const base = baseUrl(req);
         res.set("Cache-Control", "no-store");
         res.json({
             status,
+            sort,
             page,
             hasMore: shares.length > PAGE_SIZE,
             shares: shares.slice(0, PAGE_SIZE).map((s) => serializeOwnedShare(s, base)),

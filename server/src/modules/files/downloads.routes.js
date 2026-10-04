@@ -8,6 +8,7 @@ const { limiter } = require("../../shared/rateLimit");
 const { PREVIEWABLE_TYPES, liveFilter, NOT_FOUND_MESSAGE } = require("../shares/shares.service");
 const { notifyShare } = require("../realtime/realtime");
 const { publish } = require("../../infrastructure/queue");
+const { visitorToken } = require("../analytics/visitors");
 
 // GET /api/files/:token: a download link handed out when a share is opened.
 // Checks the share is still live, counts the download, then hands over the
@@ -57,7 +58,9 @@ const createDownloadsRouter = (ctx) => {
                     fileId: String(file._id),
                     fileName: file.originalName,
                     size: file.size,
+                    mimeType: file.mimeType,
                     downloads,
+                    visitor: visitorToken(req),
                 });
             }
 

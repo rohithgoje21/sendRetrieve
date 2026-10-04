@@ -6,6 +6,7 @@ export const sharesKey = ["shares"] as const;
 export const configKey = ["config"] as const;
 export const devicesKey = ["devices"] as const;
 export const notificationsKey = ["notifications"] as const;
+export const analyticsKey = ["analytics"] as const;
 export const notificationSettingsKey = ["notification-settings"] as const;
 
 export const createQueryClient = () => {

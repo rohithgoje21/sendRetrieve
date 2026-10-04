@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/inputs";
 import { Alert, Badge, Card, Skeleton } from "@/components/ui/feedback";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useSession } from "@/hooks/useSession";
+import { SiteAnalytics } from "@/components/SiteAnalytics";
 import { api } from "@/lib/api";
 import { can } from "@/lib/permissions";
 import { formatCode, formatDate, formatDateTime, formatSize, normalizeCodeInput, pluralize, stripCode } from "@/lib/format";
@@ -342,6 +343,7 @@ export default function AdminPage() {
                 <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">Site activity, accounts and moderation.</p>
             </div>
             <Stats />
+            <SiteAnalytics />
             <UsersTable />
             <ShareLookup />
             <p className="flex items-center gap-1.5 text-xs text-zinc-500">

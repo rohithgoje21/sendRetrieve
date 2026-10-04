@@ -117,10 +117,12 @@ const handlers = {
     "summary.weekly": async (message, ctx) => {
         const { userId, from, to, week } = message.data;
         const summary = await summarizeWeek(userId, new Date(from), new Date(to));
-        if (!summary.sharesCreated && !summary.activeShares) return; // nothing to tell
+        if (!summary.sharesCreated && !summary.activeShares && !summary.views) return; // nothing to tell
         const parts = [
             plural(summary.sharesCreated, "new share"),
-            ...(summary.sharesCreated ? [`opened ${plural(summary.views, "time")}`, plural(summary.downloads, "download")] : []),
+            plural(summary.views, "view"),
+            ...(summary.visitors ? [`~${plural(summary.visitors, "visitor")}`] : []),
+            plural(summary.downloads, "download"),
             `${summary.activeShares} active`,
         ];
         await notify(ctx, message, {

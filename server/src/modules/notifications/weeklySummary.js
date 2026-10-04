@@ -5,32 +5,21 @@ const User = require("../users/user.model");
 const { liveFilter } = require("../shares/shares.service");
 const { resolvePreferences } = require("./preferences");
 const { publish } = require("../../infrastructure/queue");
+const { ownerActivity } = require("../analytics/analytics.service");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// A user's week: shares created in [from, to), how much they were opened and
-// downloaded, and how many shares are active now. Exact numbers from the
-// shares themselves (the analytics module adds activity on older shares).
+// A user's week [from, to): shares created, activity on all their shares
+// (views, downloads, unique visitors, from the analytics statistics), and how
+// many shares are active now.
 const summarizeWeek = async (userId, from, to) => {
     const ownerId = new mongoose.Types.ObjectId(String(userId));
-    const [created] = await Share.aggregate([
-        { $match: { ownerId, uploadPending: { $ne: true }, createdAt: { $gte: from, $lt: to } } },
-        {
-            $group: {
-                _id: null,
-                sharesCreated: { $sum: 1 },
-                views: { $sum: "$views" },
-                downloads: { $sum: { $sum: "$files.downloads" } },
-            },
-        },
+    const [sharesCreated, activity, activeShares] = await Promise.all([
+        Share.countDocuments({ ownerId, uploadPending: { $ne: true }, createdAt: { $gte: from, $lt: to } }),
+        ownerActivity(ownerId, from, to),
+        Share.countDocuments({ ownerId, ...liveFilter() }),
     ]);
-    const activeShares = await Share.countDocuments({ ownerId, ...liveFilter() });
-    return {
-        sharesCreated: created?.sharesCreated ?? 0,
-        views: created?.views ?? 0,
-        downloads: created?.downloads ?? 0,
-        activeShares,
-    };
+    return { sharesCreated, views: activity.views, downloads: activity.downloads, visitors: activity.visitors, activeShares };
 };
 
 // Once a week (config.notifications.weeklySummary, UTC), queues one summary

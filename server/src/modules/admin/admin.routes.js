@@ -12,6 +12,8 @@ const { can } = require("../auth/permissions");
 const { revokeAllSessions } = require("../auth/sessions");
 const { liveFilter, serializeOwnedShare, shareStatus, endShares, discardShares } = require("../shares/shares.service");
 const { getBus, isQueue } = require("../../infrastructure/queue");
+const { siteAnalytics } = require("../analytics/analytics.service");
+const { periodParam } = require("../analytics/analytics.routes");
 const { emailBreaker } = require("../../infrastructure/mailer");
 const { scannerBreaker } = require("../../infrastructure/clamav");
 const { pushBreaker } = require("../../infrastructure/webPush");
@@ -75,6 +77,12 @@ const createAdminRouter = () => {
             // deleted when they end, so this undercounts older activity).
             activity: { views: activity[0]?.views ?? 0, downloads: activity[0]?.downloads ?? 0 },
         });
+    });
+
+    // Site-wide statistics over 7, 30 or 90 days.
+    router.get("/analytics", async (req, res) => {
+        res.set("Cache-Control", "no-store");
+        res.json(await siteAnalytics(periodParam(req)));
     });
 
     router.get("/users", authorize("users.read"), async (req, res) => {

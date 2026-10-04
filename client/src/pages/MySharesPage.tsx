@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Archive, Clock, Download, Eye, FileText, HardDrive, Inbox, Lock, Plus, Trash2 } from "lucide-react";
+import { Archive, Clock, Download, Eye, FileText, HardDrive, Inbox, Lock, Plus, Search, SearchX, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Alert, Badge, Card, EmptyState, Skeleton } from "@/components/ui/feedback";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -11,16 +11,46 @@ import { buttonClasses } from "@/components/ui/styles";
 import { CopyButton } from "@/components/CopyButton";
 import { QrCodeButton } from "@/components/QrCode";
 import { SharedContent } from "@/components/SharedContent";
+import { LineChart } from "@/components/charts";
+import { Input, Select } from "@/components/ui/inputs";
 import { api } from "@/lib/api";
 import { formatCode, formatDateTime, formatRelative, formatSize, pluralize } from "@/lib/format";
-import { sharesKey } from "@/lib/queryClient";
-import type { OwnedShare, SharesPage, ShareStatus } from "@/lib/types";
+import { analyticsKey, sharesKey } from "@/lib/queryClient";
+import { ACTIVITY_SERIES, CATEGORY_LABELS } from "@/lib/analytics";
+import type { FileCategory, OwnedShare, ShareAnalytics, SharesPage, ShareStatus } from "@/lib/types";
 
 const STATUSES: { value: ShareStatus; label: string }[] = [
     { value: "active", label: "Active" },
     { value: "expired", label: "Expired" },
     { value: "deleted", label: "Deleted" },
 ];
+
+// Search, filters and sort, kept in the URL (?q=...&kind=...).
+const FILTERS = {
+    kind: [
+        { value: "", label: "Any content" },
+        { value: "files", label: "With files" },
+        { value: "text", label: "Text only" },
+    ],
+    fileType: [
+        { value: "", label: "Any file type" },
+        ...(["image", "video", "audio", "document", "archive"] as FileCategory[]).map((c) => ({ value: c, label: CATEGORY_LABELS[c] })),
+    ],
+    protected: [
+        { value: "", label: "Any access" },
+        { value: "yes", label: "Password protected" },
+        { value: "no", label: "No password" },
+    ],
+    sort: [
+        { value: "", label: "Newest first" },
+        { value: "oldest", label: "Oldest first" },
+        { value: "views", label: "Most viewed" },
+        { value: "downloads", label: "Most downloaded" },
+        { value: "size", label: "Largest" },
+        { value: "expiring", label: "Expiring soonest" },
+    ],
+} as const;
+type FilterKey = keyof typeof FILTERS;
 
 const EMPTY: Record<ShareStatus, { icon: typeof Inbox; title: string; body: string }> = {
     active: { icon: Inbox, title: "No active shares", body: "Anything you send while logged in shows up here." },
@@ -92,6 +122,28 @@ function ShareDetail({ code }: { code: string }) {
     );
 }
 
+// Views, visitors and downloads of one share over the last 30 days.
+function ShareActivityStats({ code }: { code: string }) {
+    const { data, error } = useQuery({
+        queryKey: [...analyticsKey, "share", code],
+        queryFn: () => api<ShareAnalytics>(`/api/me/analytics/shares/${code}?days=30`),
+    });
+    if (error) return <Alert tone="error">{error.message}</Alert>;
+    if (!data) return <Skeleton className="h-32 w-full" />;
+    return (
+        <section aria-label="Activity, last 30 days">
+            <h3 className="text-sm font-medium">Last 30 days</h3>
+            <p className="mt-0.5 text-xs text-zinc-500">
+                {pluralize(data.totals.views, "view")} · ~{pluralize(data.totals.visitors, "visitor")} · {pluralize(data.totals.downloads, "download")} ·{" "}
+                {formatSize(data.totals.bytes)} downloaded
+            </p>
+            <div className="mt-2">
+                <LineChart data={data.daily} series={ACTIVITY_SERIES} height={150} label={`Activity of share ${formatCode(code)}, last 30 days`} />
+            </div>
+        </section>
+    );
+}
+
 function ShareCard({ share }: { share: OwnedShare }) {
     const queryClient = useQueryClient();
     const [expanded, setExpanded] = useState(false);
@@ -154,6 +206,9 @@ function ShareCard({ share }: { share: OwnedShare }) {
                 {expanded && (
                     <div className="mt-4 animate-fade-in border-t border-zinc-200 pt-4 dark:border-zinc-800">
                         <ShareDetail code={share.code} />
+                        <div className="mt-5">
+                            <ShareActivityStats code={share.code} />
+                        </div>
                     </div>
                 )}
             </article>
@@ -177,16 +232,43 @@ export default function MySharesPage() {
     const requested = params.get("status");
     const status: ShareStatus = STATUSES.some((s) => s.value === requested) ? (requested as ShareStatus) : "active";
 
+    // The search box updates the URL as you type; the list follows a beat behind.
+    const [search, setSearch] = useState(params.get("q") ?? "");
+    const deferredSearch = useDeferredValue(search.trim());
+    const filters = Object.fromEntries((Object.keys(FILTERS) as FilterKey[]).map((k) => [k, params.get(k) ?? ""])) as Record<FilterKey, string>;
+    const filtering = Boolean(deferredSearch || filters.kind || filters.fileType || filters.protected);
+
+    const update = (changes: Record<string, string>) => {
+        const next = new URLSearchParams(params);
+        for (const [key, value] of Object.entries(changes)) {
+            if (value) next.set(key, value);
+            else next.delete(key);
+        }
+        setParams(next, { replace: true });
+    };
+    useEffect(() => {
+        if ((params.get("q") ?? "") !== deferredSearch) update({ q: deferredSearch });
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the search text settles
+    }, [deferredSearch]);
+
+    const listQuery = new URLSearchParams({ status, ...(deferredSearch ? { q: deferredSearch } : {}) });
+    for (const [key, value] of Object.entries(filters)) if (value) listQuery.set(key, value);
+
     const query = useInfiniteQuery({
-        queryKey: [...sharesKey, "list", status],
-        queryFn: ({ pageParam }) => api<SharesPage>(`/api/me/shares?status=${status}&page=${pageParam}`),
+        queryKey: [...sharesKey, "list", listQuery.toString()],
+        queryFn: ({ pageParam }) => api<SharesPage>(`/api/me/shares?${listQuery}&page=${pageParam}`),
         initialPageParam: 1,
         getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
+        placeholderData: (previous) => previous,
     });
 
     const shares = query.data?.pages.flatMap((p) => p.shares) ?? [];
     const counts = query.data?.pages[0]?.counts;
     const empty = EMPTY[status];
+    const clearFilters = () => {
+        setSearch("");
+        update({ q: "", kind: "", fileType: "", protected: "" });
+    };
 
     return (
         <div>
@@ -209,9 +291,37 @@ export default function MySharesPage() {
                     label,
                     count: counts?.[value],
                     active: value === status,
-                    onSelect: () => setParams(value === "active" ? {} : { status: value }, { replace: true }),
+                    onSelect: () => update({ status: value === "active" ? "" : value }),
                 }))}
             />
+
+            <div className="mt-3 flex flex-wrap gap-2" role="search">
+                <div className="relative min-w-48 flex-1">
+                    <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-zinc-400" aria-hidden />
+                    <Input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search file names, messages, codes"
+                        aria-label="Search shares"
+                        className="pl-9"
+                    />
+                </div>
+                {(Object.keys(FILTERS) as FilterKey[]).map((key) => (
+                    <Select
+                        key={key}
+                        aria-label={key === "sort" ? "Sort by" : `Filter by ${key === "fileType" ? "file type" : key === "protected" ? "password" : "content"}`}
+                        value={filters[key]}
+                        onChange={(e) => update({ [key]: e.target.value })}
+                        className="w-auto"
+                    >
+                        {FILTERS[key].map((option) => (
+                            <option key={option.value} value={option.value}>
+                                {option.label}
+                            </option>
+                        ))}
+                    </Select>
+                ))}
+            </div>
 
             <div className="mt-4 space-y-3">
                 {query.isPending &&
@@ -232,7 +342,18 @@ export default function MySharesPage() {
                     </Alert>
                 )}
 
-                {query.isSuccess && shares.length === 0 && (
+                {query.isSuccess && shares.length === 0 && filtering && (
+                    <EmptyState icon={SearchX} title="No shares match">
+                        Try other words or filters.
+                        <div className="mt-4">
+                            <Button variant="secondary" size="sm" onClick={clearFilters}>
+                                Clear search and filters
+                            </Button>
+                        </div>
+                    </EmptyState>
+                )}
+
+                {query.isSuccess && shares.length === 0 && !filtering && (
                     <EmptyState icon={empty.icon} title={empty.title}>
                         {empty.body}
                         {status === "active" && (

@@ -6,7 +6,12 @@ const { startScheduler } = require("./scheduler");
 
 // Background workers. Run in their own process (server/worker.js) when
 // RabbitMQ is used, or inside the API process otherwise.
-const WORKERS = [require("./cleanup.worker"), require("./notification.worker"), require("./processing.worker")];
+const WORKERS = [
+    require("./cleanup.worker"),
+    require("./notification.worker"),
+    require("./processing.worker"),
+    require("./analytics.worker"),
+];
 
 const PROCESSED_TTL_SECONDS = 24 * 60 * 60;
 

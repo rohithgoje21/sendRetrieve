@@ -80,14 +80,15 @@ const templates = {
             unsubscribeUrl,
         }),
 
-    "weekly-summary": ({ name, sharesCreated, views, downloads, activeShares, sharesUrl, unsubscribeUrl }) =>
+    "weekly-summary": ({ name, sharesCreated, views, visitors, downloads, activeShares, sharesUrl, unsubscribeUrl }) =>
         notificationEmail({
             subject: "Your week on sendRetrieve",
             name,
             paragraphs: [
-                sharesCreated
-                    ? `This week you created ${plural(sharesCreated, "share")}: opened ${plural(views, "time")}, with ${downloads ? plural(downloads, "download") : "no downloads yet"}.`
-                    : "You didn't create any shares this week.",
+                `This week you created ${plural(sharesCreated, "share")}.`,
+                views
+                    ? `Your shares were opened ${plural(views, "time")}${visitors ? ` by about ${visitors === 1 ? "1 person" : `${visitors} people`}` : ""}, with ${downloads ? plural(downloads, "download") : "no downloads"}.`
+                    : "Nobody opened your shares this week.",
                 activeShares ? `${plural(activeShares, "share")} ${activeShares === 1 ? "is" : "are"} still active.` : "None of your shares are active right now.",
             ],
             action: { label: "See your shares", url: sharesUrl },

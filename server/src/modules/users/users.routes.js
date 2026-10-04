@@ -7,6 +7,7 @@ const RefreshToken = require("../auth/refreshToken.model");
 const Session = require("../auth/session.model");
 const Notification = require("../notifications/notification.model");
 const PushSubscription = require("../notifications/pushSubscription.model");
+const { ShareStat } = require("../analytics/stats.models");
 const { deviceLabel } = require("../auth/devices");
 const schemas = require("./users.schemas");
 const { HttpError } = require("../../shared/errors");
@@ -122,6 +123,7 @@ const createUsersRouter = (ctx) => {
             await Session.deleteMany({ userId: req.user._id });
             await Notification.deleteMany({ userId: req.user._id });
             await PushSubscription.deleteMany({ userId: req.user._id });
+            await ShareStat.deleteMany({ ownerId: req.user._id });
             await User.deleteOne({ _id: req.user._id });
             req.log.info({ event: "account.deleted", sharesDeleted: shares.length }, "Account deleted");
 

@@ -15,6 +15,7 @@ const PushSubscription = require("../src/modules/notifications/pushSubscription.
 const { deleteExpiredShares, requeueStuckDeletions } = require("../src/workers/scheduler");
 const { queueWeeklySummaries } = require("../src/modules/notifications/weeklySummary");
 const { createKeyValueStore } = require("../src/infrastructure/kv");
+const { recordView, recordDownload } = require("../src/modules/analytics/analytics.service");
 
 useTestDatabase();
 
@@ -286,20 +287,30 @@ describe("weekly summary", () => {
         const kv = createKeyValueStore(null);
         const ada = await register("ada@example.com");
         const idle = await register("idle@example.com");
-        const { download } = await sharedFile(ada);
-        await download();
-        // The week ending on that Monday morning.
+        await sharedFile(ada);
+        await settle();
+        // Activity in the week ending on that Monday morning: two people
+        // opened the share (one of them twice), one downloaded.
         // (raw update: Mongoose won't change createdAt)
         await Share.collection.updateMany({}, { $set: { createdAt: new Date("2030-01-05T12:00:00Z") } });
+        const share = await Share.findOne();
+        const event = { shareId: share._id, ownerId: share.ownerId, at: new Date("2030-01-05T13:00:00Z"), size: 100, mimeType: "text/plain" };
+        await recordView({ ...event, visitor: "aaaaaaaaaaaaaaaa" });
+        await recordView({ ...event, visitor: "aaaaaaaaaaaaaaaa" });
+        await recordView({ ...event, visitor: "0123456789abcdef" });
+        await recordDownload({ ...event, visitor: "0123456789abcdef" });
 
         await queueWeeklySummaries({ kv, now: monday });
         await settle();
 
         const summary = (await notificationsOf(ada)).notifications.find((n) => n.event === "weeklySummary");
-        expect(summary).toMatchObject({ title: "Your week on sendRetrieve", body: "1 new share · opened 1 time · 1 download · 1 active" });
+        expect(summary).toMatchObject({
+            title: "Your week on sendRetrieve",
+            body: "1 new share · 3 views · ~2 visitors · 1 download · 1 active",
+        });
         const [email] = emails(/Your week/);
         expect(email).toMatchObject({ to: "ada@example.com" });
-        expect(email.text).toMatch(/This week you created 1 share: opened 1 time, with 1 download\./);
+        expect(email.text).toMatch(/Your shares were opened 3 times by about 2 people, with 1 download\./);
         expect((await notificationsOf(idle)).notifications).toEqual([]);
     });
 });

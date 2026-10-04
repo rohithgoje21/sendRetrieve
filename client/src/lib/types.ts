@@ -261,6 +261,53 @@ export interface NotificationEventPayload {
     unread: number;
 }
 
+// Analytics (GET /api/me/analytics, /api/admin/analytics)
+export type FileCategory = "image" | "video" | "audio" | "document" | "archive" | "other";
+
+export interface ActivityTotals {
+    views: number;
+    downloads: number;
+    // Bandwidth: bytes downloaded
+    bytes: number;
+    // Unique visitors (an estimate; counted per day)
+    visitors: number;
+}
+
+export interface DailyActivity extends ActivityTotals {
+    day: string; // YYYY-MM-DD (UTC)
+    [key: string]: number | string;
+}
+
+export interface MyAnalytics {
+    days: number;
+    from: string;
+    to: string;
+    totals: ActivityTotals & { sharesCreated: number };
+    previous: ActivityTotals;
+    daily: DailyActivity[];
+    downloadsByType: Record<FileCategory, number>;
+    fileTypes: Record<FileCategory, { files: number; bytes: number }>;
+    topShares: ({ code: string | null; label: string } & ActivityTotals)[];
+}
+
+export interface ShareAnalytics {
+    days: number;
+    totals: ActivityTotals;
+    daily: DailyActivity[];
+    files: { id: string; name: string; downloads: number; size: number }[];
+}
+
+export interface SiteAnalytics {
+    days: number;
+    from: string;
+    to: string;
+    totals: ActivityTotals & { sharesCreated: number; filesUploaded: number; bytesUploaded: number };
+    previous: ActivityTotals & { sharesCreated: number; filesUploaded: number; bytesUploaded: number };
+    daily: (DailyActivity & { sharesCreated: number; bytesUploaded: number })[];
+    downloadsByType: Record<FileCategory, number>;
+    uploadsByType: Record<FileCategory, { files: number; bytes: number }>;
+}
+
 // Admin dashboard
 export interface AdminStats {
     users: { total: number; verified: number; disabled: number; admins: number; newThisWeek: number };

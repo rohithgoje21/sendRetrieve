@@ -140,7 +140,7 @@ export function FilePreview({ name, mimeType, previewUrl, thumbnailUrl, width, h
                 loading="lazy"
                 width={width ?? undefined}
                 height={height ?? undefined}
-                className="h-auto max-h-80 w-full rounded-lg bg-zinc-100 object-contain dark:bg-zinc-800"
+                className="mx-auto h-auto max-h-80 max-w-full rounded-lg object-contain"
             />
         );
         return previewUrl ? (
