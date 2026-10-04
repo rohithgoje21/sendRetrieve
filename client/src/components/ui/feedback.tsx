@@ -118,7 +118,7 @@ export function EmptyState({ icon: Icon, title, children }: { icon: typeof Info;
     return (
         <div className="flex flex-col items-center rounded-2xl border border-dashed border-zinc-300 px-6 py-14 text-center dark:border-zinc-700">
             <div className="flex size-12 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
-                <Icon className="size-5 text-zinc-500" aria-hidden />
+                <Icon className="size-5 text-zinc-500 dark:text-zinc-400" aria-hidden />
             </div>
             <h3 className="mt-4 font-medium">{title}</h3>
             {children && <div className="mt-1 max-w-sm text-sm text-zinc-500 dark:text-zinc-400">{children}</div>}

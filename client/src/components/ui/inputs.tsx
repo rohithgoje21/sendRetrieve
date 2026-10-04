@@ -31,7 +31,7 @@ export function Select({ invalid, className, children, ...props }: WithInvalid<C
                 {children}
             </select>
             <ChevronDown
-                className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-zinc-500"
+                className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-zinc-500 dark:text-zinc-400"
                 aria-hidden
             />
         </div>
@@ -46,7 +46,7 @@ export function PasswordInput({ className, ...props }: WithInvalid<Omit<Componen
             <button
                 type="button"
                 onClick={() => setVisible((v) => !v)}
-                className="absolute top-1/2 right-1.5 flex size-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                className="absolute top-1/2 right-1.5 flex size-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                 aria-label={visible ? "Hide password" : "Show password"}
             >
                 {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}

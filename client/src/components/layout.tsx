@@ -84,7 +84,7 @@ function UserMenu({ user }: { user: User }) {
                     {user.name.trim().charAt(0) || "?"}
                 </span>
                 <span className="hidden max-w-36 truncate text-sm font-medium sm:block">{user.name}</span>
-                <ChevronDown className="size-4 text-zinc-500" aria-hidden />
+                <ChevronDown className="size-4 text-zinc-500 dark:text-zinc-400" aria-hidden />
             </button>
 
             {open && (
@@ -94,7 +94,7 @@ function UserMenu({ user }: { user: User }) {
                 >
                     <div className="px-3 py-2">
                         <p className="truncate text-sm font-medium">{user.name}</p>
-                        <p className="truncate text-xs text-zinc-500">{user.email}</p>
+                        <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">{user.email}</p>
                     </div>
                     <div className="my-1 h-px bg-zinc-200 dark:bg-zinc-800" />
                     <Link role="menuitem" to="/shares" onClick={close} className={itemClass}>
@@ -203,7 +203,7 @@ export function Layout() {
                     <Outlet />
                 </Suspense>
             </main>
-            <footer className="border-t border-zinc-200 py-6 text-center text-xs text-zinc-500 dark:border-zinc-800">
+            <footer className="border-t border-zinc-200 py-6 text-center text-xs text-zinc-500 dark:text-zinc-400 dark:border-zinc-800">
                 Shares delete themselves when they expire.
             </footer>
             <Toaster theme={resolvedTheme} position="top-center" richColors closeButton />

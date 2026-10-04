@@ -176,13 +176,13 @@ function Devices() {
                     const Icon = DEVICE_ICONS[session.device.type] ?? MonitorSmartphone;
                     return (
                         <li key={session.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-                            <Icon className="size-5 shrink-0 text-zinc-500" aria-hidden />
+                            <Icon className="size-5 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden />
                             <div className="min-w-0 flex-1">
                                 <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
                                     {session.device.label}
                                     {session.current && <Badge tone="success">This device</Badge>}
                                 </p>
-                                <p className="text-xs text-zinc-500">
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400">
                                     {session.current ? "Active now" : `Last active ${formatRelative(session.lastSeenAt)}`} · logged in{" "}
                                     {formatDate(session.createdAt)}
                                     {session.ipHint && <> · network {session.ipHint}</>}

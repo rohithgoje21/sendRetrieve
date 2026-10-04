@@ -59,7 +59,7 @@ export default function LoginPage() {
                     label="Password"
                     error={errors.password?.message}
                     action={
-                        <Link to="/forgot-password" className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
+                        <Link to="/forgot-password" className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100">
                             Forgot password?
                         </Link>
                     }

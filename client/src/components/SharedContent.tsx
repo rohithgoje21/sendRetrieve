@@ -37,7 +37,7 @@ export function SharedContent({ text, files }: { text?: string | null; files: Co
             {files.length > 0 && (
                 <section>
                     <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-                        <Paperclip className="size-4 text-zinc-500" aria-hidden />
+                        <Paperclip className="size-4 text-zinc-500 dark:text-zinc-400" aria-hidden />
                         {files.length === 1 ? "1 file" : `${files.length} files`}
                     </h3>
                     <ul className="space-y-2">
@@ -57,7 +57,7 @@ export function SharedContent({ text, files }: { text?: string | null; files: Co
                                         <p className="truncate text-sm font-medium" title={file.name}>
                                             {file.name}
                                         </p>
-                                        <p className="text-xs text-zinc-500">
+                                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
                                             {formatSize(file.size)}
                                             {file.downloads !== undefined &&
                                                 ` · ${file.downloads} ${file.downloads === 1 ? "download" : "downloads"}`}

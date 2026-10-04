@@ -42,7 +42,7 @@ export function Modal({ open, title, onClose, children, className }: ModalProps)
                 <button
                     type="button"
                     onClick={onClose}
-                    className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                     aria-label="Close"
                 >
                     <X className="size-4" />

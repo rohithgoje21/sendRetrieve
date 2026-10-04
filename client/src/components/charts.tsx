@@ -66,11 +66,11 @@ function Tooltip({ x, width, children }: { x: number; width: number; children: R
 function TableView({ data, series, format }: { data: Datum[]; series: Series[]; format: (v: number) => string }) {
     return (
         <details className="mt-2 text-xs">
-            <summary className="cursor-pointer text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">Show as table</summary>
+            <summary className="cursor-pointer text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300">Show as table</summary>
             <div className="mt-2 max-h-64 overflow-auto">
                 <table className="w-full tabular-nums">
                     <thead>
-                        <tr className="text-left text-zinc-500">
+                        <tr className="text-left text-zinc-500 dark:text-zinc-400">
                             <th className="py-1 pr-3 font-medium">Day</th>
                             {series.map((s) => (
                                 <th key={s.key} className="py-1 pr-3 text-right font-medium">
@@ -179,6 +179,7 @@ export function LineChart({
             <div
                 ref={ref}
                 className="relative rounded-md outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                role="group"
                 tabIndex={0}
                 aria-label={`${label}. Use the left and right arrow keys to read each day.`}
                 onKeyDown={onKeyDown}
@@ -227,12 +228,12 @@ export function LineChart({
                 </svg>
                 {active !== null && data[active] && (
                     <Tooltip x={x(active)} width={width}>
-                        <p className="mb-1 text-zinc-500">{dayLabel(data[active].day)}</p>
+                        <p className="mb-1 text-zinc-500 dark:text-zinc-400">{dayLabel(data[active].day)}</p>
                         {series.map((s) => (
                             <p key={s.key} className="flex items-center gap-2">
                                 <span className="h-0.5 w-3 rounded-full" style={{ background: s.color }} aria-hidden />
                                 <span className="font-semibold text-zinc-900 tabular-nums dark:text-zinc-100">{format(Number(data[active][s.key]))}</span>
-                                <span className="text-zinc-500">{s.label}</span>
+                                <span className="text-zinc-500 dark:text-zinc-400">{s.label}</span>
                             </p>
                         ))}
                     </Tooltip>
@@ -301,6 +302,7 @@ export function ColumnChart({
             <div
                 ref={ref}
                 className="relative rounded-md outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                role="group"
                 tabIndex={0}
                 aria-label={`${label}. Use the left and right arrow keys to read each day.`}
                 onKeyDown={onKeyDown}
@@ -319,7 +321,7 @@ export function ColumnChart({
                 </svg>
                 {active !== null && data[active] && (
                     <Tooltip x={x(active)} width={width}>
-                        <p className="mb-1 text-zinc-500">{dayLabel(data[active].day)}</p>
+                        <p className="mb-1 text-zinc-500 dark:text-zinc-400">{dayLabel(data[active].day)}</p>
                         <p className="font-semibold text-zinc-900 tabular-nums dark:text-zinc-100">{format(Number(data[active][valueKey]))}</p>
                     </Tooltip>
                 )}
@@ -339,7 +341,7 @@ export function BarList({ items, label }: { items: { key: string; label: string;
                 <li key={item.key} className="text-sm">
                     <div className="mb-1 flex items-baseline justify-between gap-3">
                         <span className="text-zinc-700 dark:text-zinc-300">{item.label}</span>
-                        <span className="text-xs text-zinc-500 tabular-nums">
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
                             <span className="font-semibold text-zinc-900 dark:text-zinc-100">{item.value.toLocaleString()}</span>
                             {item.detail && <> · {item.detail}</>}
                         </span>
@@ -360,7 +362,7 @@ export function ChartCard({ title, description, children, className }: { title: 
     return (
         <Card className={cn("p-4 sm:p-5", className)}>
             <h2 className="font-semibold">{title}</h2>
-            {description && <p className="mt-0.5 text-xs text-zinc-500">{description}</p>}
+            {description && <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{description}</p>}
             <div className="mt-3">{children}</div>
         </Card>
     );
@@ -401,7 +403,7 @@ export function StatTile({
                 {format(value)}
             </p>
             {previous !== undefined && (
-                <p className="mt-0.5 text-xs text-zinc-500">
+                <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                     {change === null ? (
                         "new this period"
                     ) : (

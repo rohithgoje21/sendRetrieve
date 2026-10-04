@@ -36,7 +36,7 @@ export function QrCodeImage({ url, code }: { url: string; code: string }) {
             ) : (
                 <Skeleton className="size-56 rounded-xl" />
             )}
-            <p className="text-center text-xs text-zinc-500">Scan with a phone camera to open the share.</p>
+            <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">Scan with a phone camera to open the share.</p>
             {dataUrl && (
                 <a href={dataUrl} download={`sendretrieve-${code}.png`} className={buttonClasses({ variant: "secondary", size: "sm" })}>
                     <Download aria-hidden />

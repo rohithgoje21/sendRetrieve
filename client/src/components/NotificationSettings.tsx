@@ -28,7 +28,7 @@ function ThisBrowser({ publicKey }: { publicKey: string }) {
             .catch(() => setState("off"));
     }, []);
 
-    if (permission === "unsupported") return <p className="text-sm text-zinc-500">This browser can't show notifications from websites.</p>;
+    if (permission === "unsupported") return <p className="text-sm text-zinc-500 dark:text-zinc-400">This browser can't show notifications from websites.</p>;
 
     const toggle = async () => {
         setBusy(true);
@@ -52,7 +52,7 @@ function ThisBrowser({ publicKey }: { publicKey: string }) {
     return (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 px-3 py-2.5 dark:border-zinc-800">
             <p className="flex items-center gap-2 text-sm">
-                <BellRing className="size-4 text-zinc-500" aria-hidden />
+                <BellRing className="size-4 text-zinc-500 dark:text-zinc-400" aria-hidden />
                 {state === "on"
                     ? "Browser notifications are on for this browser."
                     : permission === "denied"
@@ -102,7 +102,7 @@ export function NotificationSettings() {
             <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                     <thead>
-                        <tr className="text-left text-xs text-zinc-500">
+                        <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
                             <th className="pb-2 font-medium">Notify me when</th>
                             {channels.map((c) => (
                                 <th key={c.key} className="w-16 pb-2 text-center font-medium">

@@ -29,13 +29,13 @@ function Item({ notification, onOpen }: { notification: AppNotification; onOpen:
                 )}
             >
                 <Icon
-                    className={cn("mt-0.5 size-4 shrink-0", notification.event === "shareBlocked" ? "text-red-500" : "text-zinc-500")}
+                    className={cn("mt-0.5 size-4 shrink-0", notification.event === "shareBlocked" ? "text-red-500" : "text-zinc-500 dark:text-zinc-400")}
                     aria-hidden
                 />
                 <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">{notification.title}</span>
                     {notification.body && <span className="mt-0.5 block text-xs text-zinc-600 dark:text-zinc-400">{notification.body}</span>}
-                    <time className="mt-1 block text-xs text-zinc-500" dateTime={notification.updatedAt}>
+                    <time className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400" dateTime={notification.updatedAt}>
                         {formatRelative(notification.updatedAt)}
                     </time>
                 </span>
@@ -115,7 +115,7 @@ export function NotificationBell() {
                                 <Skeleton className="h-10 w-full" />
                             </div>
                         ) : data.notifications.length === 0 ? (
-                            <p className="px-3 py-8 text-center text-sm text-zinc-500">You're all caught up.</p>
+                            <p className="px-3 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">You're all caught up.</p>
                         ) : (
                             <ul className="space-y-0.5">
                                 {data.notifications.map((n) => (

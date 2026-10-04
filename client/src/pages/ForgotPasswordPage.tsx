@@ -45,7 +45,7 @@ export default function ForgotPasswordPage() {
                     <p className="mt-3 text-sm text-zinc-700 dark:text-zinc-300" role="status">
                         {sentMessage}
                     </p>
-                    <p className="mt-2 text-xs text-zinc-500">The link works for 30 minutes.</p>
+                    <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">The link works for 30 minutes.</p>
                 </div>
             ) : (
                 <form onSubmit={onSubmit} noValidate className="space-y-4">

@@ -31,7 +31,7 @@ export function Field({ label, children, error, hint, optional, action, classNam
             <div className="flex items-baseline justify-between gap-2">
                 <label htmlFor={id} className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                     {label}
-                    {optional && <span className="font-normal text-zinc-500"> (optional)</span>}
+                    {optional && <span className="font-normal text-zinc-500 dark:text-zinc-400"> (optional)</span>}
                 </label>
                 {action}
             </div>

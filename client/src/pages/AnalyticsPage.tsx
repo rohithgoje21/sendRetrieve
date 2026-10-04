@@ -68,7 +68,7 @@ export default function AnalyticsPage() {
                                         .map(([key, t]) => ({ key, label: CATEGORY_LABELS[key as FileCategory], value: t.files, detail: formatSize(t.bytes) }))}
                                 />
                             ) : (
-                                <p className="text-sm text-zinc-500">No files shared in this period.</p>
+                                <p className="text-sm text-zinc-500 dark:text-zinc-400">No files shared in this period.</p>
                             )}
                         </ChartCard>
                         <ChartCard title="What gets downloaded" description="Downloads by file type.">
@@ -80,19 +80,19 @@ export default function AnalyticsPage() {
                                         .map(([key, n]) => ({ key, label: CATEGORY_LABELS[key as FileCategory], value: n }))}
                                 />
                             ) : (
-                                <p className="text-sm text-zinc-500">No downloads in this period.</p>
+                                <p className="text-sm text-zinc-500 dark:text-zinc-400">No downloads in this period.</p>
                             )}
                         </ChartCard>
                     </div>
 
                     <ChartCard title="Most active shares">
                         {data.topShares.length === 0 ? (
-                            <p className="text-sm text-zinc-500">No activity in this period.</p>
+                            <p className="text-sm text-zinc-500 dark:text-zinc-400">No activity in this period.</p>
                         ) : (
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm">
                                     <thead>
-                                        <tr className="text-left text-xs text-zinc-500">
+                                        <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
                                             <th className="pb-2 font-medium">Share</th>
                                             <th className="pb-2 text-right font-medium">Views</th>
                                             <th className="pb-2 text-right font-medium">Visitors</th>
@@ -109,7 +109,7 @@ export default function AnalyticsPage() {
                                                             {formatCode(s.code)}
                                                         </Link>
                                                     ) : null}
-                                                    <span className="block truncate text-xs text-zinc-500">{s.label}</span>
+                                                    <span className="block truncate text-xs text-zinc-500 dark:text-zinc-400">{s.label}</span>
                                                 </td>
                                                 <td className="py-2 text-right">{s.views.toLocaleString()}</td>
                                                 <td className="py-2 text-right">~{s.visitors.toLocaleString()}</td>
@@ -123,7 +123,7 @@ export default function AnalyticsPage() {
                         )}
                     </ChartCard>
 
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
                         Unique visitors are estimated without tracking anyone: no addresses are stored, and the same person on
                         two different days counts twice.
                     </p>

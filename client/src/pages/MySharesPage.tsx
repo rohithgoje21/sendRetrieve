@@ -114,7 +114,7 @@ function ShareDetail({ code }: { code: string }) {
     return (
         <div className="space-y-3">
             <SharedContent text={data.share.text} files={data.share.files} />
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
                 Viewing your own share doesn't count as a view. Download links work for{" "}
                 {Math.round(data.downloadWindowSeconds / 60)} minutes.
             </p>
@@ -133,7 +133,7 @@ function ShareActivityStats({ code }: { code: string }) {
     return (
         <section aria-label="Activity, last 30 days">
             <h3 className="text-sm font-medium">Last 30 days</h3>
-            <p className="mt-0.5 text-xs text-zinc-500">
+            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                 {pluralize(data.totals.views, "view")} · ~{pluralize(data.totals.visitors, "visitor")} · {pluralize(data.totals.downloads, "download")} ·{" "}
                 {formatSize(data.totals.bytes)} downloaded
             </p>
@@ -172,7 +172,7 @@ function ShareCard({ share }: { share: OwnedShare }) {
                     <p className="mt-2 line-clamp-2 text-sm text-zinc-700 dark:text-zinc-300">{share.textPreview}</p>
                 )}
                 {share.files.length > 0 && (
-                    <p className="mt-1.5 flex items-center gap-1.5 truncate text-sm text-zinc-500">
+                    <p className="mt-1.5 flex items-center gap-1.5 truncate text-sm text-zinc-500 dark:text-zinc-400">
                         <FileText className="size-3.5 shrink-0" aria-hidden />
                         <span className="truncate">{share.files.map((f) => f.name).join(", ")}</span>
                     </p>
@@ -377,7 +377,7 @@ export default function MySharesPage() {
                 )}
 
                 {status !== "active" && shares.length > 0 && (
-                    <p className="pt-2 text-center text-xs text-zinc-500">
+                    <p className="pt-2 text-center text-xs text-zinc-500 dark:text-zinc-400">
                         Ended shares are listed for 30 days. Their content and files are already gone.
                     </p>
                 )}

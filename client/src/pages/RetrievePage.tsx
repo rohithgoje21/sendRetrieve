@@ -150,7 +150,7 @@ function RetrieveForm({ initialCode }: { initialCode: string }) {
                 <Button type="submit" size="lg" className="w-full" loading={open.isPending}>
                     {open.isPending ? "Opening…" : "Open share"}
                 </Button>
-                <p className="text-center text-xs text-zinc-500">
+                <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
                     Opening a share counts as a view. Some shares can only be opened once.
                 </p>
             </form>

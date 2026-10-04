@@ -24,7 +24,7 @@ function StatTile({ icon: Icon, label, value, detail }: { icon: typeof Users; la
                 {label}
             </div>
             <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
-            {detail && <p className="mt-0.5 text-xs text-zinc-500">{detail}</p>}
+            {detail && <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{detail}</p>}
         </Card>
     );
 }
@@ -122,7 +122,7 @@ function UsersTable() {
     return (
         <Card className="overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 p-4 dark:border-zinc-800">
-                <h2 className="font-semibold">Users {data && <span className="font-normal text-zinc-500">({data.total})</span>}</h2>
+                <h2 className="font-semibold">Users {data && <span className="font-normal text-zinc-500 dark:text-zinc-400">({data.total})</span>}</h2>
                 <div className="relative w-full sm:w-64">
                     <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-zinc-400" aria-hidden />
                     <Input
@@ -165,7 +165,7 @@ function UsersTable() {
                                     )}
                                     {self && <Badge>You</Badge>}
                                 </p>
-                                <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500">
+                                <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                                     <span className="truncate">{user.email}</span>
                                     {user.emailVerified && (
                                         <span className="inline-flex items-center gap-1">
@@ -201,7 +201,7 @@ function UsersTable() {
                         </li>
                     );
                 })}
-                {data && data.users.length === 0 && <li className="px-4 py-8 text-center text-sm text-zinc-500">No users match.</li>}
+                {data && data.users.length === 0 && <li className="px-4 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">No users match.</li>}
                 {!data && !query.error && (
                     <li className="space-y-2 p-4">
                         <Skeleton className="h-10 w-full" />
@@ -215,7 +215,7 @@ function UsersTable() {
                     <Button variant="secondary" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
                         Previous
                     </Button>
-                    <span className="text-zinc-500">Page {page}</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Page {page}</span>
                     <Button variant="secondary" size="sm" disabled={!data.hasMore} onClick={() => setPage((p) => p + 1)}>
                         Next
                     </Button>
@@ -349,7 +349,7 @@ export default function AdminPage() {
             <UsersTable />
             <ShareLookup />
             {can(me, "queues.read") && <BackgroundJobs />}
-            <p className="flex items-center gap-1.5 text-xs text-zinc-500">
+            <p className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
                 <Upload className="size-3.5" aria-hidden /> Stats refresh every 30 seconds.
             </p>
         </div>

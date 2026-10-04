@@ -128,7 +128,7 @@ function SendForm({ config, onSent }: { config: AppConfig; onSent: (share: Creat
 
                     <div className="space-y-2">
                         <span className="text-sm font-medium">
-                            Files <span className="font-normal text-zinc-500">(optional)</span>
+                            Files <span className="font-normal text-zinc-500 dark:text-zinc-400">(optional)</span>
                         </span>
                         <Dropzone
                             onFiles={addFiles}
@@ -196,7 +196,7 @@ function SendForm({ config, onSent }: { config: AppConfig; onSent: (share: Creat
                     )}
                 </div>
 
-                <p className="mt-4 text-center text-xs text-zinc-500">
+                <p className="mt-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
                     {user ? (
                         <>
                             Signed in: this share will appear in{" "}
@@ -266,7 +266,7 @@ function SendResult({ share, onReset }: { share: CreatedShare; onReset: () => vo
             )}
 
             <div className="mt-6 rounded-xl bg-zinc-50 px-4 py-5 dark:bg-zinc-800/50">
-                <p className="text-xs font-medium tracking-wide text-zinc-500 uppercase">Share code</p>
+                <p className="text-xs font-medium tracking-wide text-zinc-500 dark:text-zinc-400 uppercase">Share code</p>
                 <p className="mt-1 font-mono text-4xl font-bold tracking-[0.15em] sm:text-5xl" data-testid="share-code">
                     {code}
                 </p>
@@ -392,7 +392,7 @@ function ResumeUploadCard({
                     <li key={`${f.name}-${f.size}`} className="flex items-center gap-2.5 text-sm">
                         <FileIcon mimeType={f.type} />
                         <span className="min-w-0 flex-1 truncate">{f.name}</span>
-                        <span className="shrink-0 text-xs text-zinc-500 tabular-nums">{formatSize(f.size)}</span>
+                        <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">{formatSize(f.size)}</span>
                     </li>
                 ))}
             </ul>

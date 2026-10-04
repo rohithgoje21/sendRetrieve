@@ -55,7 +55,7 @@ export function SiteAnalytics() {
                                         .map(([key, t]) => ({ key, label: CATEGORY_LABELS[key as FileCategory], value: t.files, detail: formatSize(t.bytes) }))}
                                 />
                             ) : (
-                                <p className="text-sm text-zinc-500">No files uploaded in this period.</p>
+                                <p className="text-sm text-zinc-500 dark:text-zinc-400">No files uploaded in this period.</p>
                             )}
                         </ChartCard>
                     </div>

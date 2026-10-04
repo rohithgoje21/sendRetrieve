@@ -49,7 +49,7 @@ export function UploadPanel({
                 </div>
                 <Progress value={fraction * 100} label="Upload progress" />
                 {speed !== null && speed > 0 && progress && (
-                    <p className="text-xs text-zinc-500 tabular-nums">
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
                         {formatSize(speed)}/s · {formatTimeLeft((progress.total - progress.loaded) / speed)}
                     </p>
                 )}

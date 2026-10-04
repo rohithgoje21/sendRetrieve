@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent } from "react";
+import { type DragEvent, useId, useState } from "react";
 import { File, FileArchive, FileAudio, FileImage, FileText, FileVideo, UploadCloud, X } from "lucide-react";
 import { formatSize } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -15,7 +15,7 @@ export function FileIcon({ mimeType, className }: { mimeType: string; className?
               : /zip|compressed|tar|rar|7z/.test(mimeType)
                 ? FileArchive
                 : File;
-    return <Icon className={cn("size-5 shrink-0 text-zinc-500", className)} aria-hidden />;
+    return <Icon className={cn("size-5 shrink-0 text-zinc-500 dark:text-zinc-400", className)} aria-hidden />;
 }
 
 interface DropzoneProps {
@@ -24,9 +24,12 @@ interface DropzoneProps {
     hint: string;
 }
 
+// A label around the (visually hidden) file input: clicking anywhere opens the
+// file picker, the input itself takes keyboard focus, and files can be
+// dropped on it.
 export function Dropzone({ onFiles, disabled, hint }: DropzoneProps) {
-    const inputRef = useRef<HTMLInputElement>(null);
     const [dragging, setDragging] = useState(false);
+    const hintId = useId();
 
     const onDrop = (event: DragEvent) => {
         event.preventDefault();
@@ -35,17 +38,7 @@ export function Dropzone({ onFiles, disabled, hint }: DropzoneProps) {
     };
 
     return (
-        <div
-            role="button"
-            tabIndex={disabled ? -1 : 0}
-            aria-disabled={disabled}
-            onClick={() => !disabled && inputRef.current?.click()}
-            onKeyDown={(event) => {
-                if (!disabled && (event.key === "Enter" || event.key === " ")) {
-                    event.preventDefault();
-                    inputRef.current?.click();
-                }
-            }}
+        <label
             onDragOver={(event) => {
                 event.preventDefault();
                 if (!disabled) setDragging(true);
@@ -54,7 +47,7 @@ export function Dropzone({ onFiles, disabled, hint }: DropzoneProps) {
             onDrop={onDrop}
             className={cn(
                 "flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors",
-                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500",
+                "has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-indigo-500",
                 dragging
                     ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/30"
                     : "border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:border-zinc-600 dark:hover:bg-zinc-800/40",
@@ -68,22 +61,22 @@ export function Dropzone({ onFiles, disabled, hint }: DropzoneProps) {
                 <span className="font-medium">Drop files here</span> or{" "}
                 <span className="font-medium text-indigo-600 dark:text-indigo-400">browse</span>
             </p>
-            <p className="mt-1 text-xs text-zinc-500">{hint}</p>
+            <p id={hintId} className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                {hint}
+            </p>
             <input
-                ref={inputRef}
                 type="file"
                 multiple
                 className="sr-only"
                 aria-label="Choose files"
-                tabIndex={-1}
+                aria-describedby={hintId}
                 disabled={disabled}
-                onClick={(event) => event.stopPropagation()}
                 onChange={(event) => {
                     onFiles([...(event.target.files ?? [])]);
                     event.target.value = "";
                 }}
             />
-        </div>
+        </label>
     );
 }
 
@@ -99,12 +92,12 @@ export function SelectedFileList({ files, onRemove, disabled }: { files: File[];
                         <span className="min-w-0 flex-1 truncate text-sm" title={file.name}>
                             {file.name}
                         </span>
-                        <span className="text-xs text-zinc-500 tabular-nums">{formatSize(file.size)}</span>
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">{formatSize(file.size)}</span>
                         <button
                             type="button"
                             onClick={() => onRemove(index)}
                             disabled={disabled}
-                            className="flex size-7 cursor-pointer items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                            className="flex size-7 cursor-pointer items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                             aria-label={`Remove ${file.name}`}
                         >
                             <X className="size-4" />
@@ -112,7 +105,7 @@ export function SelectedFileList({ files, onRemove, disabled }: { files: File[];
                     </li>
                 ))}
             </ul>
-            <p className="text-right text-xs text-zinc-500">
+            <p className="text-right text-xs text-zinc-500 dark:text-zinc-400">
                 {files.length} {files.length === 1 ? "file" : "files"} · {formatSize(total)}
             </p>
         </div>
