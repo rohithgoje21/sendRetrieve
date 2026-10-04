@@ -11,7 +11,8 @@
 //   create   guests creating text shares
 //   login    users logging in (password hashing: CPU-heavy by design)
 // Results: p50/p95/p99 latency, throughput and error rate, per scenario and
-// overall, printed and saved to load/results/summary.json.
+// overall, printed and saved to load/results/summary.json (SUMMARY_PATH when
+// k6 runs outside Docker).
 
 import http from "k6/http";
 import { check } from "k6";
@@ -118,5 +119,5 @@ export function handleSummary(data) {
                 .join(", "),
         "",
     ];
-    return { stdout: lines.join("\n"), "/scripts/results/summary.json": JSON.stringify(data, null, 2) };
+    return { stdout: lines.join("\n"), [__ENV.SUMMARY_PATH || "/scripts/results/summary.json"]: JSON.stringify(data, null, 2) };
 }

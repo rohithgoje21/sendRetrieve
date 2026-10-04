@@ -127,7 +127,7 @@ const createS3Storage = () => {
                 await client.send(new HeadBucketCommand({ Bucket: bucket }));
             } catch (err) {
                 if (!isNotFound(err) || !createBucket) {
-                    throw new Error(`Storage bucket "${bucket}" isn't reachable: ${err.name || err.message}`);
+                    throw new Error(`Storage bucket "${bucket}" isn't reachable: ${err.name || err.message}`, { cause: err });
                 }
                 await client.send(new CreateBucketCommand({ Bucket: bucket }));
                 log.info({ event: "storage.bucket_created", bucket }, "Created storage bucket");

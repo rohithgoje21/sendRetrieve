@@ -23,7 +23,10 @@ RUN npm ci --workspace server --omit=dev && npm cache clean --force \
 
 # ---- Runtime ----
 FROM node:24-alpine
+# The commit being built (CI passes it); /healthz reports it.
+ARG GIT_SHA=""
 ENV NODE_ENV=production \
+    GIT_SHA=${GIT_SHA} \
     CLIENT_DIR=/app/client/dist \
     UPLOAD_DIR=/app/uploads
 WORKDIR /app

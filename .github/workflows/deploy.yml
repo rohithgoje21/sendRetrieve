@@ -1,0 +1,114 @@
+# Deployments, after CI passes:
+#
+#   develop branch      -> dev
+#   master / main       -> staging
+#   a published release -> production (protect the "production" environment
+#                          with required reviewers in the repository settings)
+#   manual run          -> any environment
+#
+# Each GitHub environment (dev, staging, production) holds its own:
+#   secrets  RENDER_API_DEPLOY_HOOK, RENDER_WORKER_DEPLOY_HOOK (Render: service
+#            Settings -> Deploy Hook), VERCEL_DEPLOY_HOOK (optional; Vercel
+#            usually deploys from Git by itself)
+#   vars     APP_URL (the environment's public URL)
+#
+# After triggering the deploys, the job waits until /healthz reports the
+# new commit, then smoke-tests the live site.
+
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [develop, master, main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Where to deploy
+        type: choice
+        options: [dev, staging, production]
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  target:
+    name: Pick the environment
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    outputs:
+      environment: ${{ steps.pick.outputs.environment }}
+      sha: ${{ steps.pick.outputs.sha }}
+    steps:
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT: ${{ github.event.inputs.environment }}
+        run: |
+          case "$EVENT" in
+            workflow_run)
+              if [ "$BRANCH" = "develop" ]; then echo "environment=dev" >> "$GITHUB_OUTPUT"
+              else echo "environment=staging" >> "$GITHUB_OUTPUT"; fi
+              echo "sha=$RUN_SHA" >> "$GITHUB_OUTPUT" ;;
+            release)
+              echo "environment=production" >> "$GITHUB_OUTPUT"
+              echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "environment=$INPUT" >> "$GITHUB_OUTPUT"
+              echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  deploy:
+    name: Deploy to ${{ needs.target.outputs.environment }}
+    needs: target
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.environment }}
+      url: ${{ vars.APP_URL }}
+    concurrency:
+      group: deploy-${{ needs.target.outputs.environment }}
+      cancel-in-progress: false
+    env:
+      APP_URL: ${{ vars.APP_URL }}
+      SHA: ${{ needs.target.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.target.outputs.sha }}
+
+      - name: Trigger the deploys
+        env:
+          RENDER_API_DEPLOY_HOOK: ${{ secrets.RENDER_API_DEPLOY_HOOK }}
+          RENDER_WORKER_DEPLOY_HOOK: ${{ secrets.RENDER_WORKER_DEPLOY_HOOK }}
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_API_DEPLOY_HOOK" ]; then
+            echo "::error::RENDER_API_DEPLOY_HOOK isn't set for this environment"; exit 1
+          fi
+          # Deploy hooks deploy a specific commit with ?ref=
+          curl -fsS -X POST "$RENDER_API_DEPLOY_HOOK&ref=$SHA" > /dev/null
+          if [ -n "$RENDER_WORKER_DEPLOY_HOOK" ]; then curl -fsS -X POST "$RENDER_WORKER_DEPLOY_HOOK&ref=$SHA" > /dev/null; fi
+          if [ -n "$VERCEL_DEPLOY_HOOK" ]; then curl -fsS -X POST "$VERCEL_DEPLOY_HOOK" > /dev/null; fi
+          echo "Deploys triggered for $SHA"
+
+      - name: Wait for the new version
+        run: |
+          for i in $(seq 1 60); do
+            version=$(curl -fs "$APP_URL/healthz" | jq -r '.version // empty' || true)
+            if [ "$version" = "$SHA" ]; then echo "Live: $version"; exit 0; fi
+            echo "Waiting ($i/60): running ${version:-unknown}"
+            sleep 15
+          done
+          echo "::error::$SHA wasn't live after 15 minutes"; exit 1
+
+      - name: Smoke-test the live site
+        run: |
+          curl -fs "$APP_URL/healthz" | jq -e '.status == "ok" or .status == "degraded"'
+          curl -fs "$APP_URL/api/config" | jq -e '.maxFiles > 0'
+          curl -fs "$APP_URL/" | grep -q '<div id="root">'

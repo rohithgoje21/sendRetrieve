@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const { getBus } = require("../../infrastructure/queue");
 const scanner = require("../../infrastructure/clamav");
+const config = require("../../config");
 
 const CHECK_TIMEOUT_MS = 2000;
 
@@ -49,6 +50,7 @@ const createHealthRouter = (ctx) => {
             storage,
             queue,
             scanner: virusScanner,
+            version: config.version,
             uptimeSeconds: Math.round(process.uptime()),
         });
     });

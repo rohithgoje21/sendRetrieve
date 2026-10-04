@@ -196,6 +196,10 @@ const config = {
     // orphaned files (only one worker instance does it per interval).
     cleanupIntervalMs: 60 * 1000,
 
+    // The commit this build runs (reported by /healthz, so a deploy can tell
+    // when it's live). Docker builds get GIT_SHA; Render sets RENDER_GIT_COMMIT.
+    version: process.env.GIT_SHA || process.env.RENDER_GIT_COMMIT || null,
+
     // Per-IP rate limits. RATE_LIMITS=off is for load tests and end-to-end
     // tests only (one machine sending everything); the server warns loudly.
     rateLimits: process.env.RATE_LIMITS !== "off",

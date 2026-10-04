@@ -14,8 +14,9 @@
     "build": "npm run build -w client",
     "start": "npm start -w server",
     "test": "npm test -w server && npm test -w client",
-    "lint": "npm run lint -w client",
-    "test:e2e": "playwright test -c e2e"
+    "lint": "npm run lint -w client && npm run lint -w server",
+    "test:e2e": "playwright test -c e2e",
+    "typecheck": "tsc -b client"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

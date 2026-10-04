@@ -93,7 +93,7 @@ describe("in-app notifications", () => {
         expect(notifications[0]).toMatchObject({ event: "fileDownloaded", title: '"report.txt" was downloaded', read: false, link: "/shares" });
 
         await download();
-        ({ notifications, unread } = await notificationsOf(owner));
+        ({ notifications } = await notificationsOf(owner));
         expect(notifications).toHaveLength(1);
         expect(notifications[0].title).toMatch(/were downloaded 2 times/);
 

@@ -39,6 +39,7 @@ const GUEST_PURGE_DELAY_MS = 60 * 60 * 1000;
 
 // Strip control characters and path separators; keep the name readable.
 const cleanFileName = (name) =>
+    // eslint-disable-next-line no-control-regex -- matching control characters is the point
     name.replace(/[\u0000-\u001f\u007f/\\]/g, "_").trim().slice(0, 255) || "file";
 
 // A declared type is only a hint (the real one is detected after upload), but

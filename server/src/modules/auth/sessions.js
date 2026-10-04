@@ -135,14 +135,14 @@ const rotateSession = async (req, res) => {
     const user = await User.findById(current.userId);
     if (!user || user.disabledAt) return null;
 
-    let session = await Session.findOne({ familyId: current.familyId });
+    const session = await Session.findOne({ familyId: current.familyId });
     if (session?.revokedAt) return null;
     if (session) {
         Object.assign(session, sessionDetails(req));
         await session.save();
     } else {
         // A login from before sessions were recorded: record it now.
-        session = await Session.create({
+        await Session.create({
             userId: user._id,
             familyId: current.familyId,
             deviceId: deviceIdOf(req) ?? randomToken(),

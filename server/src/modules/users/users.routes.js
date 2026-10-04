@@ -1,5 +1,4 @@
 const express = require("express");
-const config = require("../../config");
 const Share = require("../shares/share.model");
 const User = require("./user.model");
 const RefreshToken = require("../auth/refreshToken.model");

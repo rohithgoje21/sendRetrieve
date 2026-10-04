@@ -1,0 +1,237 @@
+# Continuous integration: every push and pull request.
+#
+#   lint        ESLint (client + server), TypeScript
+#   server      Jest, with Redis and RabbitMQ integration tests (service containers)
+#   client      Vitest
+#   e2e         Playwright (Chromium) against the built app, then a k6 smoke load test
+#   image       Docker build, Trivy vulnerability scan; pushed to GHCR from the main branch
+#   audit       npm audit of production dependencies
+#   monitoring  promtool / amtool checks of the Prometheus and Alertmanager configs
+#
+# Deployments run from deploy.yml once this workflow passes.
+
+name: CI
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  lint:
+    name: Lint and typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+
+  server:
+    name: Server tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+      rabbitmq:
+        image: rabbitmq:4
+        env:
+          # The default guest user can only connect from inside the container.
+          RABBITMQ_DEFAULT_USER: ci
+          RABBITMQ_DEFAULT_PASS: ci-secret
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping" --health-interval 10s --health-timeout 10s --health-retries 12
+    env:
+      TEST_REDIS_URL: redis://localhost:6379
+      TEST_AMQP_URL: amqp://ci:ci-secret@localhost:5672
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      # mongodb-memory-server downloads a MongoDB binary on first use.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - run: npm test -w server
+
+  client:
+    name: Client tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm test -w client
+
+  e2e:
+    name: End-to-end and load smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+      # A short, light k6 run against the same app: catches performance
+      # regressions that break the latency thresholds.
+      - name: Start the app for the load smoke test
+        run: |
+          E2E_PORT=4174 node e2e/server.js > server.log 2>&1 &
+          for _ in $(seq 1 60); do curl -fs http://localhost:4174/healthz > /dev/null && break; sleep 2; done
+          curl -fs http://localhost:4174/healthz
+      - uses: grafana/setup-k6-action@v1
+      - name: k6 smoke test
+        run: |
+          mkdir -p load/results
+          k6 run --quiet -e BASE_URL=http://localhost:4174 -e SCALE=0.1 -e DURATION=20s \
+            -e SUMMARY_PATH=load/results/summary.json load/sendretrieve.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-smoke-summary
+          path: load/results/summary.json
+          retention-days: 7
+
+  image:
+    name: Docker image
+    runs-on: ubuntu-latest
+    needs: [lint, server, client, e2e]
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    services:
+      mongo:
+        image: mongo:8
+        ports: ["27017:27017"]
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/sendretrieve
+      PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: sendretrieve:ci
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan for vulnerabilities (report)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: sendretrieve:ci
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image
+      - name: Fail on critical vulnerabilities with a fix available
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: sendretrieve:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Smoke-test the image
+        run: |
+          docker run -d --name app --network host -e STORAGE_DRIVER=disk \
+            -e MONGODB_URI=mongodb://localhost:27017/sendretrieve -e TOKEN_SECRET=ci -e APP_URL=http://localhost:8080 sendretrieve:ci
+          for _ in $(seq 1 30); do curl -fs http://localhost:8080/healthz > /dev/null && break; sleep 2; done
+          docker logs app
+          curl -fs http://localhost:8080/healthz | jq -e '.status == "ok" and .version == "${{ github.sha }}"'
+          curl -fs http://localhost:8080/ | grep -q '<div id="root">'
+          docker rm -f app
+      - uses: docker/login-action@v3
+        if: env.PUSH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push to GitHub Container Registry
+        if: env.PUSH == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm audit --omit=dev --audit-level=high
+
+  monitoring:
+    name: Monitoring config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prometheus config and alert rules
+        run: |
+          docker run --rm -v "$PWD/docker/monitoring:/etc/prometheus" --entrypoint promtool \
+            prom/prometheus:v3.2.1 check config /etc/prometheus/prometheus.yml
+      - name: Alertmanager config
+        run: |
+          docker run --rm -v "$PWD/docker/monitoring:/cfg" --entrypoint amtool \
+            prom/alertmanager:v0.28.1 check-config /cfg/alertmanager.yml
+      - name: Grafana dashboard is valid JSON
+        run: jq -e '.panels | length > 0' docker/monitoring/grafana/dashboards/sendretrieve.json
