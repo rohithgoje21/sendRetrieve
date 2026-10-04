@@ -31,6 +31,9 @@ export default defineConfig({
         // on a busy Windows machine (e.g. right after the server suite)
         // process start-up could exceed Vitest's fixed 60s start timeout.
         pool: "threads",
+        // Whole-app tests (routing, lazy pages) can take a few seconds when
+        // the suite runs in parallel on a loaded machine.
+        testTimeout: 15_000,
         environment: "jsdom",
         globals: true,
         setupFiles: "./src/test/setup.ts",

@@ -26,6 +26,8 @@ x-app-environment: &app-environment
   RESEND_API_KEY: ${RESEND_API_KEY:-}
   EMAIL_FROM: ${EMAIL_FROM:-}
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  # RATE_LIMITS=off for load tests only (see load/).
+  RATE_LIMITS: ${RATE_LIMITS:-}
   # Files live in MinIO. The app reaches it as minio:9000 inside Docker;
   # browsers reach it as localhost:9000, so signed URLs use that address.
   STORAGE_DRIVER: s3

@@ -4,3 +4,10 @@ uploads/
 coverage/
 client/dist/
 *.tsbuildinfo
+
+# End-to-end test output
+e2e/.state.json
+playwright-report/
+test-results/
+# Load test results
+load/results/
