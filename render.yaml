@@ -1,15 +1,16 @@
-# Render Blueprint: the API and the background worker (both from this repo's
-# Dockerfile) and a Redis-compatible Key Value instance. Outside services are
-# connected through environment variables; values marked `sync: false` are
-# entered in the Render dashboard:
+# Render Blueprint, on free plans: the API (this repo's Dockerfile), which
+# also runs the background jobs, and a Redis-compatible Key Value instance.
+# Outside services are connected through environment variables; values
+# marked `sync: false` are entered in the Render dashboard:
 #   MongoDB         e.g. MongoDB Atlas
 #   object storage  Cloudflare R2, AWS S3 or MinIO (S3 API)
-#   RabbitMQ        e.g. CloudAMQP (Render doesn't host it); without AMQP_URL
-#                   the API runs the jobs itself and the worker isn't needed
-# The env group holds what the API and the worker share. Deploys are
+#   RabbitMQ        optional, e.g. CloudAMQP (Render doesn't host it); without
+#                   AMQP_URL the API queues the jobs in memory
+# On paid plans, uncomment the worker (and ClamAV) below. Deploys are
 # triggered by GitHub Actions (deploy.yml) through each service's deploy hook.
-# See "Deploying" in README.md.
+# See "Deploying" and "Free deployment" in README.md.
 
+# What the API and the worker share.
 envVarGroups:
   - name: sendretrieve-shared
     envVars:
@@ -61,8 +62,8 @@ services:
     autoDeploy: false # GitHub Actions deploys after CI passes
     envVars:
       - fromGroup: sendretrieve-shared
-      # Shared with the worker: both sign and check tokens. Generated here,
-      # copied to the worker below.
+      # Signs sessions and links. Generated here; the worker, if enabled,
+      # copies it (both sign and check tokens).
       - key: TOKEN_SECRET
         generateValue: true
       # Requests arrive through Vercel's proxy and then Render's.
@@ -76,33 +77,42 @@ services:
       # Optional extra frontend origins, comma-separated (e.g. preview deployments).
       - key: CORS_ORIGINS
         sync: false
+      # Background jobs (scans, thumbnails, file cleanup, notifications,
+      # analytics, scheduled sweeps) run in the API: consumed from RabbitMQ
+      # when AMQP_URL is set, else queued in memory. Set to "false" when the
+      # worker below runs them.
+      - key: RUN_WORKERS
+        value: "true"
 
-  # Background jobs: malware scans, thumbnails, file cleanup, notifications,
-  # analytics, scheduled sweeps. Needs AMQP_URL (RabbitMQ). Background workers
-  # aren't available on Render's free plan.
-  - type: worker
-    name: sendretrieve-worker
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: node worker.js
-    plan: starter
-    autoDeploy: false
-    envVars:
-      - fromGroup: sendretrieve-shared
-      - key: TOKEN_SECRET
-        fromService:
-          type: web
-          name: sendretrieve-api
-          envVarKey: TOKEN_SECRET
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: sendretrieve-redis
-          property: connectionString
+  # Optional, paid (background workers start at Render's Starter plan): the
+  # background jobs in a service of their own. Needs AMQP_URL (RabbitMQ). Set
+  # RUN_WORKERS to "false" on the API, and add the worker's deploy hook to
+  # GitHub as RENDER_WORKER_DEPLOY_HOOK.
+  #
+  # - type: worker
+  #   name: sendretrieve-worker
+  #   runtime: docker
+  #   dockerfilePath: ./Dockerfile
+  #   dockerContext: .
+  #   dockerCommand: node worker.js
+  #   plan: starter
+  #   autoDeploy: false
+  #   envVars:
+  #     - fromGroup: sendretrieve-shared
+  #     - key: TOKEN_SECRET
+  #       fromService:
+  #         type: web
+  #         name: sendretrieve-api
+  #         envVarKey: TOKEN_SECRET
+  #     - key: REDIS_URL
+  #       fromService:
+  #         type: keyvalue
+  #         name: sendretrieve-redis
+  #         property: connectionString
 
-  # Optional: malware scanning with ClamAV, reachable only from the API and
-  # the worker (set CLAMAV_HOST in the env group). clamd needs ~1.5 GB of RAM.
+  # Optional, paid: malware scanning with ClamAV, reachable only from the API
+  # and the worker (set CLAMAV_HOST in the env group). clamd needs ~1.5 GB of
+  # RAM. Without it, files are shared unscanned.
   #
   # - type: pserv
   #   name: sendretrieve-clamav

@@ -1,16 +1,16 @@
-# Deployments, after CI passes:
+# Deploys to production after CI passes on master (or main), or when run by
+# hand from the Actions tab. One environment: on Render's free plan a second
+# copy (e.g. staging) would share the same monthly hours, and a workspace gets
+# one free Key Value. See "Free deployment" in README.md.
 #
-#   develop branch      -> dev
-#   master / main       -> staging
-#   a published release -> production (protect the "production" environment
-#                          with required reviewers in the repository settings)
-#   manual run          -> any environment
-#
-# Each GitHub environment (dev, staging, production) holds its own:
-#   secrets  RENDER_API_DEPLOY_HOOK, RENDER_WORKER_DEPLOY_HOOK (Render: service
-#            Settings -> Deploy Hook), VERCEL_DEPLOY_HOOK (optional; Vercel
-#            usually deploys from Git by itself)
-#   vars     APP_URL (the environment's public URL)
+# Settings (repository Settings -> Secrets and variables -> Actions):
+#   variable  APP_URL, the site's public URL. A repository variable, not an
+#             environment one: deploys are skipped until it's set
+#   secrets   in the "production" environment (or the repository):
+#             RENDER_API_DEPLOY_HOOK (Render: service Settings -> Deploy Hook),
+#             RENDER_WORKER_DEPLOY_HOOK (only if the worker service runs),
+#             VERCEL_DEPLOY_HOOK (optional; Vercel usually deploys from Git
+#             by itself)
 #
 # After triggering the deploys, the job waits until /healthz reports the
 # new commit, then smoke-tests the live site.
@@ -21,67 +21,33 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [develop, master, main]
-  release:
-    types: [published]
+    branches: [master, main]
   workflow_dispatch:
-    inputs:
-      environment:
-        description: Where to deploy
-        type: choice
-        options: [dev, staging, production]
-        required: true
 
 permissions:
   contents: read
 
 jobs:
-  target:
-    name: Pick the environment
-    runs-on: ubuntu-latest
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
-    outputs:
-      environment: ${{ steps.pick.outputs.environment }}
-      sha: ${{ steps.pick.outputs.sha }}
-    steps:
-      - id: pick
-        env:
-          EVENT: ${{ github.event_name }}
-          BRANCH: ${{ github.event.workflow_run.head_branch }}
-          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-          INPUT: ${{ github.event.inputs.environment }}
-        run: |
-          case "$EVENT" in
-            workflow_run)
-              if [ "$BRANCH" = "develop" ]; then echo "environment=dev" >> "$GITHUB_OUTPUT"
-              else echo "environment=staging" >> "$GITHUB_OUTPUT"; fi
-              echo "sha=$RUN_SHA" >> "$GITHUB_OUTPUT" ;;
-            release)
-              echo "environment=production" >> "$GITHUB_OUTPUT"
-              echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT" ;;
-            *)
-              echo "environment=$INPUT" >> "$GITHUB_OUTPUT"
-              echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT" ;;
-          esac
-
   deploy:
-    name: Deploy to ${{ needs.target.outputs.environment }}
-    needs: target
+    name: Deploy to production
     runs-on: ubuntu-latest
+    # After CI, only pushes to this repository: a pull request from a fork
+    # can come from a branch named master too.
+    if: >-
+      vars.APP_URL != '' && (github.event_name == 'workflow_dispatch' || (
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository))
     environment:
-      name: ${{ needs.target.outputs.environment }}
+      name: production
       url: ${{ vars.APP_URL }}
     concurrency:
-      group: deploy-${{ needs.target.outputs.environment }}
+      group: deploy-production
       cancel-in-progress: false
     env:
       APP_URL: ${{ vars.APP_URL }}
-      SHA: ${{ needs.target.outputs.sha }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.target.outputs.sha }}
-
       - name: Trigger the deploys
         env:
           RENDER_API_DEPLOY_HOOK: ${{ secrets.RENDER_API_DEPLOY_HOOK }}
@@ -89,7 +55,7 @@ jobs:
           VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
         run: |
           if [ -z "$RENDER_API_DEPLOY_HOOK" ]; then
-            echo "::error::RENDER_API_DEPLOY_HOOK isn't set for this environment"; exit 1
+            echo "::error::APP_URL is set but the RENDER_API_DEPLOY_HOOK secret isn't"; exit 1
           fi
           # Deploy hooks deploy a specific commit with ?ref=
           curl -fsS -X POST "$RENDER_API_DEPLOY_HOOK&ref=$SHA" > /dev/null
@@ -97,15 +63,16 @@ jobs:
           if [ -n "$VERCEL_DEPLOY_HOOK" ]; then curl -fsS -X POST "$VERCEL_DEPLOY_HOOK" > /dev/null; fi
           echo "Deploys triggered for $SHA"
 
+      # Render builds the Docker image first, which takes a few minutes.
       - name: Wait for the new version
         run: |
-          for i in $(seq 1 60); do
-            version=$(curl -fs "$APP_URL/healthz" | jq -r '.version // empty' || true)
+          for i in $(seq 1 80); do
+            version=$(curl -fs --max-time 60 "$APP_URL/healthz" | jq -r '.version // empty' || true)
             if [ "$version" = "$SHA" ]; then echo "Live: $version"; exit 0; fi
-            echo "Waiting ($i/60): running ${version:-unknown}"
+            echo "Waiting ($i/80): running ${version:-unknown}"
             sleep 15
           done
-          echo "::error::$SHA wasn't live after 15 minutes"; exit 1
+          echo "::error::$SHA wasn't live after 20 minutes"; exit 1
 
       - name: Smoke-test the live site
         run: |

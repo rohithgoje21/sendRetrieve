@@ -41,7 +41,7 @@ A full-stack **MERN** application (**M**ongoDB, **E**xpress, **R**eact, **N**ode
   - **notifications**: in-app, email, browser push;
   - **analytics**: daily statistics;
   - **scheduler**: expiry, abandoned uploads, orphaned files, stuck jobs, weekly summaries. Each sweep runs on one worker at a time, coordinated by a Redis lock.
-- **Without RabbitMQ** an in-process queue with the same retry and dead-letter behavior is used, and the API runs the workers itself: fine for a single server and for tests.
+- **Without RabbitMQ** an in-process queue with the same retry and dead-letter behavior is used, and the API runs the workers itself: fine for a single server and for tests. With `RUN_WORKERS=true` the API also runs them alongside RabbitMQ, as in the [free deployment](#free-deployment).
 - **MongoDB** holds metadata, never file contents. **Object storage** holds files; browsers upload to and download from it **directly** with short-lived signed URLs.
 
 ### Sending files
@@ -127,7 +127,7 @@ Browser                              API                               Storage  
 | Security scanning | ClamAV (clamd) |
 | Observability | Pino, Prometheus, Alertmanager, Grafana |
 | Testing | Jest, Supertest, mongodb-memory-server; Vitest, Testing Library; Playwright, axe-core; k6 |
-| CI/CD | GitHub Actions, GHCR, Trivy, CodeQL, Dependabot; Render (API, worker, Key Value) + Vercel (frontend) |
+| CI/CD | GitHub Actions, GHCR, Trivy, CodeQL, Dependabot; Render (API, Key Value; worker optional) + Vercel (frontend) |
 
 ## Running locally
 
@@ -200,28 +200,58 @@ docker run --rm --network sendretrieve_default -v "$PWD/load:/scripts" \
 | Workflow | When | What |
 | --- | --- | --- |
 | `ci.yml` | every push and PR | lint + typecheck; server tests with Redis and RabbitMQ service containers; client tests; Playwright E2E and a k6 smoke run; Docker build, Trivy scan, image smoke test, push to GHCR from the main branch; npm audit; Prometheus/Alertmanager config checks |
-| `deploy.yml` | after CI passes | `develop` → **dev**, `master` → **staging**, a published release → **production** (or manual). Triggers Render deploy hooks for the API and worker (and Vercel's, if set), waits until `/healthz` reports the new commit, then smoke-tests the live site |
+| `deploy.yml` | after CI passes on `master` (or by hand) | Deploys to **production**: triggers the Render deploy hook (and the worker's and Vercel's, if set), waits until `/healthz` reports the new commit, then smoke-tests the live site |
 | `codeql.yml` | pushes, PRs, weekly | CodeQL security analysis |
 
-Each GitHub **environment** (`dev`, `staging`, `production`) has its own `RENDER_API_DEPLOY_HOOK`, `RENDER_WORKER_DEPLOY_HOOK`, optional `VERCEL_DEPLOY_HOOK` secrets and an `APP_URL` variable. Protect `production` with required reviewers.
+`deploy.yml` needs an `APP_URL` **repository variable** (it's skipped until there is one) and a `RENDER_API_DEPLOY_HOOK` secret in the `production` environment, plus `RENDER_WORKER_DEPLOY_HOOK` and `VERCEL_DEPLOY_HOOK` if you use them. Only pushes to this repository deploy, never pull requests from forks.
 
 ## Deploying
 
+`render.yaml` and `deploy.yml` are set up for free plans (see [Free deployment](#free-deployment) for the limits):
+
 ```
-Vercel    React app; rewrites /api/* to Render (same-origin cookies)
-Render    API (web) + worker (background worker) from the same image, Key Value (Redis)
-MongoDB   e.g. MongoDB Atlas          Storage   Cloudflare R2, AWS S3 or MinIO
-RabbitMQ  e.g. CloudAMQP              ClamAV    optional Render private service
+Vercel    React app; rewrites /api/* and /healthz to Render (same-origin cookies)
+Render    API (free web service), which also runs the background jobs; Key Value (Redis)
+MongoDB   e.g. MongoDB Atlas (M0)     Storage   Cloudflare R2, AWS S3 or MinIO
+RabbitMQ  optional, e.g. CloudAMQP    ClamAV    optional, paid (Render private service)
 ```
 
-1. **MongoDB** (e.g. Atlas): copy the connection string.
+1. **MongoDB** (e.g. Atlas): copy the connection string, and allow Render's outbound IP addresses (or `0.0.0.0/0`) under Network Access.
 2. **Object storage** (e.g. R2): a bucket, an API token, and CORS allowing `PUT`, `GET`, `HEAD` from your Vercel URL. Add a lifecycle rule to abort incomplete multipart uploads after a day or two.
-3. **RabbitMQ** (e.g. CloudAMQP): copy the AMQP URL. Optional: without it, leave out the worker and the API runs the jobs.
-4. **Render**: New → Blueprint → this repository. `render.yaml` creates the API, the worker and Key Value; fill in the `sync: false` values (shared ones are in the `sendretrieve-shared` env group). Copy each service's deploy hook into the GitHub environments.
+3. **RabbitMQ** (optional, e.g. CloudAMQP): copy the AMQP URL. Without it, the API queues the jobs in memory.
+4. **Render**: New → Blueprint → this repository. `render.yaml` creates the API and Key Value; fill in the `sync: false` values (shared ones are in the `sendretrieve-shared` env group). Copy the API's deploy hook (Settings → Deploy Hook).
 5. **Vercel**: import the repo with Root Directory `client`; set `VITE_REALTIME_URL` to the Render API URL (and update `client/vercel.json`'s rewrites if its URL differs).
-6. Make the first superadmin from the Render shell: `node scripts/set-role.js you@example.com superadmin`.
+6. **GitHub**: create the `production` environment with the deploy hook as the `RENDER_API_DEPLOY_HOOK` secret, then add the repository variable `APP_URL` (your Vercel URL). From then on, every push to `master` that passes CI is deployed.
+7. Sign up on the site, then make yourself superadmin from your machine (free Render services have no shell):
+
+   ```bash
+   MONGODB_URI="<Atlas connection string>" npm run set-role -w server -- you@example.com superadmin
+   ```
 
 A **single service** also works (the API image serves the React app): Render or Railway (`railway.json`), no Vercel.
+
+### Free deployment
+
+| Service | Free tier | Watch out for |
+| --- | --- | --- |
+| Render | Web services: 750 instance hours and 500 build minutes a month per workspace; one Key Value (25 MB) | Background workers start at the paid Starter plan; no shell |
+| Vercel | Hobby plan | Non-commercial use only |
+| MongoDB Atlas | M0 cluster, 512 MB | No backups |
+| Cloudflare R2 | 10 GB; 1M write and 10M read operations a month; no egress fees | Needs a payment method on the account |
+| CloudAMQP | Little Lemur: 1M messages a month, 20 connections, 100 queues | Optional |
+| Resend | 3,000 emails a month, 100 a day | Emails anyone but you only from a verified domain |
+| GitHub Actions | Unlimited minutes for public repositories | Private ones get 2,000 minutes a month, and uploading CodeQL and Trivy results needs GitHub Advanced Security: keep the repository public |
+
+Compared with `docker compose up`, which runs everything locally, the free setup gives up:
+
+- **A separate worker.** The API runs the background jobs itself (`RUN_WORKERS=true`). On a paid plan, uncomment the worker in `render.yaml`, set `RUN_WORKERS=false` on the API and add the worker's deploy hook as `RENDER_WORKER_DEPLOY_HOOK`.
+- **Malware scanning.** ClamAV needs ~1.5 GB of RAM, so files are shared unscanned. Executables and scripts are still refused, and file types still detected from their contents.
+- **Staying awake.** After 15 minutes without requests the API stops, and the next request waits about a minute while it starts. Its timers stop too: expired shares still close on time, but their files are deleted when it next wakes, and a weekly summary is skipped if the site sleeps through that whole day. Jobs queued before it stopped wait in RabbitMQ with CloudAMQP; without it they're lost, though the sweeps re-queue deletions and scans.
+- **Redis that survives restarts.** Free Key Value isn't persisted: a restart clears rate-limit counters, lockouts and pending one-time codes.
+- **Monitoring.** Prometheus, Alertmanager and Grafana run with Docker Compose only, because nothing can reach a free web service's metrics port over Render's private network. In production there's `/healthz`, the admin jobs panel and Render's logs.
+- **Staging.** A second copy would share the 750 hours (one service running all month uses about 730) and needs a second Key Value, so there's one environment: `production`.
+
+Files don't pass through Render: browsers upload to and download from R2 directly, with presigned URLs, so Render's bandwidth goes mostly on API calls.
 
 ### Environment variables
 
