@@ -45,6 +45,28 @@ describe("health check", () => {
             delete app.locals.shuttingDown;
         }
     });
+
+    test("asks object storage at most once a minute (some free tiers cap API calls)", async () => {
+        const { S3Client } = require("@aws-sdk/client-s3");
+        const { createS3Storage } = require("../src/infrastructure/storage/s3");
+        const send = jest.spyOn(S3Client.prototype, "send").mockResolvedValue({});
+        const now = jest.spyOn(Date, "now").mockReturnValue(1_000_000);
+        try {
+            const s3 = createS3Storage();
+            expect(await Promise.all([s3.health(), s3.health()])).toEqual(["up", "up"]);
+            now.mockReturnValue(1_000_000 + 59_000);
+            expect(await s3.health()).toBe("up");
+            expect(send).toHaveBeenCalledTimes(1);
+
+            send.mockRejectedValueOnce(new Error("unreachable"));
+            now.mockReturnValue(1_000_000 + 60_000);
+            expect(await s3.health()).toBe("down");
+            expect(send).toHaveBeenCalledTimes(2);
+        } finally {
+            send.mockRestore();
+            now.mockRestore();
+        }
+    });
 });
 
 describe("request IDs", () => {

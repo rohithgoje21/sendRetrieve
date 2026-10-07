@@ -212,12 +212,12 @@ docker run --rm --network sendretrieve_default -v "$PWD/load:/scripts" \
 ```
 Vercel    React app; rewrites /api/* and /healthz to Render (same-origin cookies)
 Render    API (free web service), which also runs the background jobs; Key Value (Redis)
-MongoDB   e.g. MongoDB Atlas (M0)     Storage   Cloudflare R2, AWS S3 or MinIO
+MongoDB   e.g. MongoDB Atlas (M0)     Storage   Backblaze B2, Cloudflare R2, AWS S3 or MinIO
 RabbitMQ  optional, e.g. CloudAMQP    ClamAV    optional, paid (Render private service)
 ```
 
 1. **MongoDB** (e.g. Atlas): copy the connection string, and allow Render's outbound IP addresses (or `0.0.0.0/0`) under Network Access.
-2. **Object storage** (e.g. R2): a bucket, an API token, and CORS allowing `PUT`, `GET`, `HEAD` from your Vercel URL. Add a lifecycle rule to abort incomplete multipart uploads after a day or two.
+2. **Object storage** (e.g. Backblaze B2 or R2): a private bucket, an API key, and CORS allowing `PUT`, `GET`, `HEAD` from your Vercel URL (the API sets it at startup if its key may). Add a lifecycle rule to abort incomplete multipart uploads after a day or two. On B2, also set the lifecycle to keep only the last version: B2 keeps deleted files as old versions otherwise.
 3. **RabbitMQ** (optional, e.g. CloudAMQP): copy the AMQP URL. Without it, the API queues the jobs in memory.
 4. **Render**: New → Blueprint → this repository. `render.yaml` creates the API and Key Value in Singapore: change `region` first if your database is elsewhere (it can't be changed later, and each request makes several queries). Fill in the `sync: false` values (shared ones are in the `sendretrieve-shared` env group). Copy the API's deploy hook (Settings → Deploy Hook).
 5. **Vercel**: import the repo with Root Directory `client`; set `VITE_REALTIME_URL` to the Render API URL (and update `client/vercel.json`'s rewrites if its URL differs).
@@ -237,7 +237,8 @@ A **single service** also works (the API image serves the React app): Render or 
 | Render | Web services: 750 instance hours and 500 build minutes a month per workspace; one Key Value (25 MB) | Background workers start at the paid Starter plan; no shell |
 | Vercel | Hobby plan | Non-commercial use only |
 | MongoDB Atlas | M0 cluster, 512 MB | No backups |
-| Cloudflare R2 | 10 GB; 1M write and 10M read operations a month; no egress fees | Needs a payment method on the account |
+| Backblaze B2 | 10 GB; 1 GB of downloads and 2,500 read and 2,500 list calls a day | No card needed, and without one the limits are hard caps: nothing is ever charged |
+| Cloudflare R2 (alternative) | 10 GB; 1M write and 10M read operations a month; no egress fees | Needs a payment method on the account |
 | CloudAMQP | Little Lemur: 1M messages a month, 20 connections, 100 queues | Optional |
 | Resend | 3,000 emails a month, 100 a day | Emails anyone but you only from a verified domain |
 | GitHub Actions | Unlimited minutes for public repositories | Private ones get 2,000 minutes a month, and uploading CodeQL and Trivy results needs GitHub Advanced Security: keep the repository public |
@@ -251,7 +252,7 @@ Compared with `docker compose up`, which runs everything locally, the free setup
 - **Monitoring.** Prometheus, Alertmanager and Grafana run with Docker Compose only, because nothing can reach a free web service's metrics port over Render's private network. In production there's `/healthz`, the admin jobs panel and Render's logs.
 - **Staging.** A second copy would share the 750 hours (one service running all month uses about 730) and needs a second Key Value, so there's one environment: `production`.
 
-Files don't pass through Render: browsers upload to and download from R2 directly, with presigned URLs, so Render's bandwidth goes mostly on API calls.
+Files don't pass through Render: browsers upload to and download from storage directly, with presigned URLs, so Render's bandwidth goes mostly on API calls. The API checks storage's health at most once a minute, however often `/healthz` is called, to stay within B2's daily call limits.
 
 ### Environment variables
 

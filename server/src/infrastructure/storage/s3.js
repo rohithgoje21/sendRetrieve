@@ -20,12 +20,14 @@ const config = require("../../config");
 const { logger } = require("../logger");
 
 // Object storage over the S3 API: MinIO (local Docker or self-hosted),
-// Cloudflare R2, AWS S3, or anything else that speaks S3.
+// Backblaze B2, Cloudflare R2, AWS S3, or anything else that speaks S3.
 //
 // Browsers upload and download directly from storage using short-lived
 // signed URLs, so file bytes never pass through this server.
 
 const log = logger.child({ component: "storage" });
+
+const HEALTH_CHECK_EVERY_MS = 60 * 1000;
 
 const isNotFound = (err) => err?.name === "NotFound" || err?.name === "NoSuchKey" || err?.$metadata?.httpStatusCode === 404;
 const isNoSuchUpload = (err) => err?.name === "NoSuchUpload" || err?.Code === "NoSuchUpload" || err?.$metadata?.httpStatusCode === 404;
@@ -118,6 +120,9 @@ const createS3Storage = () => {
         }
     };
 
+    // The latest health check: { at, status (a promise of "up" | "down") }.
+    let lastHealth = null;
+
     return {
         driver: "s3",
         publicOrigin,
@@ -137,13 +142,20 @@ const createS3Storage = () => {
             log.info({ event: "storage.ready", bucket, endpoint: endpoint || "aws" }, "Object storage ready");
         },
 
+        // Asks storage at most once a minute, however often /healthz is called
+        // (the host's health checks run every few seconds): each check is an
+        // API call, and some free tiers cap them, e.g. Backblaze B2 at 2,500
+        // a day, shared with the uploads' ListParts.
         async health() {
-            try {
-                await client.send(new HeadBucketCommand({ Bucket: bucket }), { abortSignal: AbortSignal.timeout(2000) });
-                return "up";
-            } catch {
-                return "down";
+            if (!lastHealth || Date.now() - lastHealth.at >= HEALTH_CHECK_EVERY_MS) {
+                lastHealth = {
+                    at: Date.now(),
+                    status: client
+                        .send(new HeadBucketCommand({ Bucket: bucket }), { abortSignal: AbortSignal.timeout(2000) })
+                        .then(() => "up", () => "down"),
+                };
             }
+            return lastHealth.status;
         },
 
         // A URL the browser PUTs the file to. Content-Type and Content-Length

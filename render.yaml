@@ -3,7 +3,7 @@
 # Outside services are connected through environment variables; values
 # marked `sync: false` are entered in the Render dashboard:
 #   MongoDB         e.g. MongoDB Atlas
-#   object storage  Cloudflare R2, AWS S3 or MinIO (S3 API)
+#   object storage  Backblaze B2, Cloudflare R2, AWS S3 or MinIO (S3 API)
 #   RabbitMQ        optional, e.g. CloudAMQP (Render doesn't host it); without
 #                   AMQP_URL the API queues the jobs in memory
 # On paid plans, uncomment the worker (and ClamAV) below. Deploys are
