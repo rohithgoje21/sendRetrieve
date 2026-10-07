@@ -3,7 +3,7 @@
 # React app (client/dist).
 
 # ---- Build the React client ----
-FROM node:24-alpine AS client
+FROM node:26-alpine AS client
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY client/package.json client/
@@ -13,7 +13,7 @@ COPY client client
 RUN npm run build --workspace client
 
 # ---- Server dependencies (production only) ----
-FROM node:24-alpine AS server-deps
+FROM node:26-alpine AS server-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY client/package.json client/
@@ -22,7 +22,7 @@ RUN npm ci --workspace server --omit=dev && npm cache clean --force \
     && mkdir -p server/node_modules
 
 # ---- Runtime ----
-FROM node:24-alpine
+FROM node:26-alpine
 # The commit being built (CI passes it); /healthz reports it.
 ARG GIT_SHA=""
 ENV NODE_ENV=production \
