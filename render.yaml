@@ -9,6 +9,10 @@
 # On paid plans, uncomment the worker (and ClamAV) below. Deploys are
 # triggered by GitHub Actions (deploy.yml) through each service's deploy hook.
 # See "Deploying" and "Free deployment" in README.md.
+#
+# Region: Singapore, the closest to the MongoDB Atlas cluster (Mumbai); every
+# request makes several queries. Services and Key Value must share a region,
+# and it can't be changed once they're created.
 
 # What the API and the worker share.
 envVarGroups:
@@ -57,6 +61,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    region: singapore
     plan: free
     healthCheckPath: /healthz
     autoDeploy: false # GitHub Actions deploys after CI passes
@@ -95,6 +100,7 @@ services:
   #   dockerfilePath: ./Dockerfile
   #   dockerContext: .
   #   dockerCommand: node worker.js
+  #   region: singapore
   #   plan: starter
   #   autoDeploy: false
   #   envVars:
@@ -119,6 +125,7 @@ services:
   #   runtime: image
   #   image:
   #     url: docker.io/clamav/clamav:stable
+  #   region: singapore
   #   plan: standard
   #   disk:
   #     name: signatures
@@ -127,6 +134,7 @@ services:
 
   - type: keyvalue
     name: sendretrieve-redis
+    region: singapore
     plan: free
     # Rate limits and lockouts must not be evicted under memory pressure.
     maxmemoryPolicy: noeviction

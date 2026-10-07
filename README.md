@@ -219,7 +219,7 @@ RabbitMQ  optional, e.g. CloudAMQP    ClamAV    optional, paid (Render private s
 1. **MongoDB** (e.g. Atlas): copy the connection string, and allow Render's outbound IP addresses (or `0.0.0.0/0`) under Network Access.
 2. **Object storage** (e.g. R2): a bucket, an API token, and CORS allowing `PUT`, `GET`, `HEAD` from your Vercel URL. Add a lifecycle rule to abort incomplete multipart uploads after a day or two.
 3. **RabbitMQ** (optional, e.g. CloudAMQP): copy the AMQP URL. Without it, the API queues the jobs in memory.
-4. **Render**: New → Blueprint → this repository. `render.yaml` creates the API and Key Value; fill in the `sync: false` values (shared ones are in the `sendretrieve-shared` env group). Copy the API's deploy hook (Settings → Deploy Hook).
+4. **Render**: New → Blueprint → this repository. `render.yaml` creates the API and Key Value in Singapore: change `region` first if your database is elsewhere (it can't be changed later, and each request makes several queries). Fill in the `sync: false` values (shared ones are in the `sendretrieve-shared` env group). Copy the API's deploy hook (Settings → Deploy Hook).
 5. **Vercel**: import the repo with Root Directory `client`; set `VITE_REALTIME_URL` to the Render API URL (and update `client/vercel.json`'s rewrites if its URL differs).
 6. **GitHub**: create the `production` environment with the deploy hook as the `RENDER_API_DEPLOY_HOOK` secret, then add the repository variable `APP_URL` (your Vercel URL). From then on, every push to `master` that passes CI is deployed.
 7. Sign up on the site, then make yourself superadmin from your machine (free Render services have no shell):
