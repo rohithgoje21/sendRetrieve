@@ -12,6 +12,7 @@ const { createDownloadsRouter } = require("./modules/files/downloads.routes");
 const { createHealthRouter } = require("./modules/system/health.routes");
 const { createConfigRouter } = require("./modules/system/config.routes");
 const { createAdminRouter } = require("./modules/admin/admin.routes");
+const { createAgentRouter } = require("./modules/agent/agent.routes");
 const { createNotificationsRouter } = require("./modules/notifications/notifications.routes");
 const { createAnalyticsRouter } = require("./modules/analytics/analytics.routes");
 const { httpMetrics } = require("./infrastructure/metrics");
@@ -142,6 +143,7 @@ const createApp = ({ rateLimit = true, redis = null, logger } = {}) => {
     app.use("/api/me/analytics", createAnalyticsRouter(ctx));
     app.use("/api/me", createUsersRouter(ctx));
     app.use("/api/admin", createAdminRouter(ctx));
+    app.use("/api/agent", createAgentRouter(ctx));
     app.use("/api/notifications", createNotificationsRouter(ctx));
     app.use("/api", createConfigRouter());
     app.use("/api", createSharesRouter(ctx));

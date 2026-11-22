@@ -12,6 +12,7 @@ const { can } = require("../auth/permissions");
 const { revokeAllSessions } = require("../auth/sessions");
 const { liveFilter, serializeOwnedShare, shareStatus, endShares, discardShares } = require("../shares/shares.service");
 const { getBus, isQueue } = require("../../infrastructure/queue");
+const { getSiteStats } = require("./admin.service");
 const { siteAnalytics } = require("../analytics/analytics.service");
 const { periodParam } = require("../analytics/analytics.routes");
 const { breakerStates } = require("../../infrastructure/breakerStatus");
@@ -21,7 +22,6 @@ require("../../infrastructure/clamav");
 require("../../infrastructure/webPush");
 
 const PAGE_SIZE = 20;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -40,45 +40,8 @@ const createAdminRouter = (ctx = {}) => {
     router.use(requireAuth, authorize("admin.access"));
 
     router.get("/stats", async (req, res) => {
-        const now = Date.now();
-        const live = liveFilter();
-        const [users, verified, disabled, admins, newUsers, activeShares, uploading, sharesToday, storageTotals, activity] =
-            await Promise.all([
-                User.countDocuments(),
-                User.countDocuments({ emailVerifiedAt: { $ne: null } }),
-                User.countDocuments({ disabledAt: { $ne: null } }),
-                User.countDocuments({ role: { $in: ["admin", "superadmin"] } }),
-                User.countDocuments({ createdAt: { $gte: new Date(now - 7 * DAY_MS) } }),
-                Share.countDocuments(live),
-                Share.countDocuments({ uploadPending: true }),
-                Share.countDocuments({ uploadPending: { $ne: true }, createdAt: { $gte: new Date(now - DAY_MS) } }),
-                // Files currently held in storage: live shares and uploads in progress.
-                Share.aggregate([
-                    { $match: { endedAt: null } },
-                    { $unwind: "$files" },
-                    { $group: { _id: null, bytes: { $sum: "$files.size" }, files: { $sum: 1 } } },
-                ]),
-                Share.aggregate([
-                    { $match: { uploadPending: { $ne: true } } },
-                    {
-                        $group: {
-                            _id: null,
-                            views: { $sum: "$views" },
-                            downloads: { $sum: { $sum: "$files.downloads" } },
-                        },
-                    },
-                ]),
-            ]);
-
         res.set("Cache-Control", "no-store");
-        res.json({
-            users: { total: users, verified, disabled, admins, newThisWeek: newUsers },
-            shares: { active: activeShares, uploading, createdToday: sharesToday },
-            storage: { bytes: storageTotals[0]?.bytes ?? 0, files: storageTotals[0]?.files ?? 0 },
-            // Totals across shares still in the database (guest shares are
-            // deleted when they end, so this undercounts older activity).
-            activity: { views: activity[0]?.views ?? 0, downloads: activity[0]?.downloads ?? 0 },
-        });
+        res.json(await getSiteStats());
     });
 
     // Site-wide statistics over 7, 30 or 90 days.

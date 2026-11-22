@@ -236,6 +236,16 @@ const config = {
     // on restart and not shared between instances).
     redisUrl: process.env.REDIS_URL || null,
 
+    // The "ask" assistant (server/src/modules/agent): tool-calling over the
+    // app's own read endpoints. Without a key the feature is unavailable
+    // (no fallback: unlike other optional integrations, there's nothing
+    // useful to degrade to).
+    agent: {
+        anthropicApiKey: process.env.ANTHROPIC_API_KEY || null,
+        model: process.env.ANTHROPIC_MODEL || "claude-haiku-5-5",
+        callTimeoutMs: Number(process.env.AGENT_TIMEOUT_MS) || 30 * 1000,
+    },
+
     logLevel: process.env.LOG_LEVEL || (process.env.NODE_ENV === "test" ? "silent" : "info"),
 
     // Per-target brute-force protection, on top of per-IP rate limits: after

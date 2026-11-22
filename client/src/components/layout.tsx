@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from "react-router";
 import { Toaster } from "sonner";
-import { BarChart3, ChevronDown, FolderOpen, LogOut, MailWarning, Moon, Settings, ShieldCheck, Sun } from "lucide-react";
+import { BarChart3, ChevronDown, FolderOpen, LogOut, MailWarning, Moon, Settings, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { useLogout, useSession } from "@/hooks/useSession";
 import { useRealtimeUpdates } from "@/hooks/useRealtime";
 import { useTheme } from "@/hooks/useTheme";
@@ -145,6 +145,10 @@ function Header() {
                             <NavLink to="/analytics" className={navLinkClass}>
                                 <BarChart3 aria-hidden />
                                 <span className="max-sm:sr-only">Analytics</span>
+                            </NavLink>
+                            <NavLink to="/ask" className={navLinkClass}>
+                                <Sparkles aria-hidden />
+                                <span className="max-sm:sr-only">Ask</span>
                             </NavLink>
                             <NotificationBell />
                             <UserMenu user={user} />

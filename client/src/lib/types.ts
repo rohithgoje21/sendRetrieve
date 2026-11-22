@@ -372,3 +372,15 @@ export interface AdminShare extends Omit<OwnedShare, "textPreview" | "text"> {
     uploading: boolean;
     owner: { id: string; name: string; email: string } | null;
 }
+
+// The "ask" assistant (POST /api/agent/me/ask, /api/agent/admin/ask)
+export interface AgentToolCall {
+    name: string;
+    input: unknown;
+    resultSummary: string;
+}
+
+export interface AgentAskResponse {
+    answer: string;
+    toolCalls: AgentToolCall[];
+}

@@ -51,6 +51,11 @@ envVarGroups:
         sync: false
       - key: VAPID_SUBJECT
         sync: false
+      # The "ask" assistant: optional, reports itself unavailable without a key.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        sync: false
       # Malware scanning: the ClamAV private service below, if you run it.
       # - key: CLAMAV_HOST
       #   value: sendretrieve-clamav

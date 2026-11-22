@@ -44,6 +44,9 @@ x-app-environment: &app-environment
   VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
   VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
   VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+  # The "ask" assistant: optional, reports itself unavailable without a key.
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
 
 x-depends-on-infrastructure: &depends-on-infrastructure
   mongo:

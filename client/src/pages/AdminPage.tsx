@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useSession } from "@/hooks/useSession";
 import { SiteAnalytics } from "@/components/SiteAnalytics";
 import { BackgroundJobs } from "@/components/BackgroundJobs";
+import { AgentChat } from "@/components/AgentChat";
 import { api } from "@/lib/api";
 import { can } from "@/lib/permissions";
 import { formatCode, formatDate, formatDateTime, formatSize, normalizeCodeInput, pluralize, stripCode } from "@/lib/format";
@@ -349,6 +350,7 @@ export default function AdminPage() {
             <UsersTable />
             <ShareLookup />
             {can(me, "queues.read") && <BackgroundJobs />}
+            {can(me, "admin.access") && <AgentChat endpoint="/api/agent/admin/ask" placeholder="e.g. How many users signed up this week?" />}
             <p className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
                 <Upload className="size-3.5" aria-hidden /> Stats refresh every 30 seconds.
             </p>

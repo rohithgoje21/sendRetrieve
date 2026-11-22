@@ -15,6 +15,7 @@ const SignupPage = lazy(() => import("@/pages/SignupPage"));
 const ForgotPasswordPage = lazy(() => import("@/pages/ForgotPasswordPage"));
 const ResetPasswordPage = lazy(() => import("@/pages/ResetPasswordPage"));
 const MySharesPage = lazy(() => import("@/pages/MySharesPage"));
+const AskPage = lazy(() => import("@/pages/AskPage"));
 const AccountPage = lazy(() => import("@/pages/AccountPage"));
 const VerifyEmailPage = lazy(() => import("@/pages/VerifyEmailPage"));
 const AdminPage = lazy(() => import("@/pages/AdminPage"));
@@ -49,6 +50,7 @@ export const routes: RouteObject[] = [
                 children: [
                     { path: "shares", element: <MySharesPage /> },
                     { path: "analytics", element: <AnalyticsPage /> },
+                    { path: "ask", element: <AskPage /> },
                     { path: "account", element: <AccountPage /> },
                     { path: "verify-email", element: <VerifyEmailPage /> },
                     {
