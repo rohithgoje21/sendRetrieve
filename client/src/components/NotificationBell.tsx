@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { Bell, CheckCheck, Download, Hourglass, ShieldAlert, ShieldCheck, BarChart3 } from "lucide-react";
+import { AlertTriangle, Bell, CheckCheck, Download, Hourglass, ShieldAlert, ShieldCheck, BarChart3 } from "lucide-react";
 import { useMarkRead, useNotifications, useNotificationUpdates } from "@/hooks/useNotifications";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ const ICONS: Record<NotificationEvent, typeof Bell> = {
     fileDownloaded: Download,
     shareEnded: Hourglass,
     shareBlocked: ShieldAlert,
+    shareSensitiveData: AlertTriangle,
     newDevice: ShieldCheck,
     weeklySummary: BarChart3,
 };

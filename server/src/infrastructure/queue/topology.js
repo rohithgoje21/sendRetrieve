@@ -29,7 +29,15 @@ const QUEUES = {
     },
     "sr.notifications": {
         description: "Emails and in-app notifications",
-        events: ["email.requested", "file.downloaded", "share.ended", "share.blocked", "auth.login", "summary.weekly"],
+        events: [
+            "email.requested",
+            "file.downloaded",
+            "share.ended",
+            "share.blocked",
+            "share.sensitive_data",
+            "auth.login",
+            "summary.weekly",
+        ],
     },
     "sr.analytics": {
         description: "Daily statistics per share",

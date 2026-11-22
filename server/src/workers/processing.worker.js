@@ -17,6 +17,10 @@ const { notifyShare } = require("../modules/realtime/realtime");
 //   2. Thumbnails for images (and their dimensions). Best effort: a failure
 //      here never blocks the share.
 //   3. The share goes live ("share:ready" to the sender).
+//
+// Sensitive-data pattern checks (credit card, AWS key, ...) run synchronously
+// in shares.routes.js at creation, not here: text-only shares never publish
+// share.uploaded (no files to wait for), so this worker never runs for them.
 
 const THUMBNAIL_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 // Bigger images aren't worth decoding just for a thumbnail.

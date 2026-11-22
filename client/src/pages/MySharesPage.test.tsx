@@ -12,6 +12,7 @@ const share: OwnedShare = {
     textPreview: "Quarterly numbers attached",
     files: [{ id: "f1", name: "report.pdf", size: 2048, mimeType: "application/pdf", downloads: 4, scanStatus: "clean" }],
     processing: false,
+    sensitiveDataFlags: [],
     totalSize: 2048,
     passwordProtected: true,
     maxViews: 5,

@@ -32,6 +32,9 @@ const shareSchema = new mongoose.Schema(
         ownerId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
         text: { type: String, default: null },
         files: { type: [fileSchema], default: [] },
+        // Patterns found in the text by the processing worker (credit card,
+        // AWS key, ...): advisory, shown to the sender, never blocks the share.
+        sensitiveDataFlags: { type: [String], default: [] },
         passwordHash: { type: String, default: null },
         // null = unlimited opens
         maxViews: { type: Number, default: null },

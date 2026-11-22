@@ -147,6 +147,8 @@ export interface OwnedShare {
     files: OwnedFile[];
     // Still being scanned for malware: can't be opened yet
     processing: boolean;
+    // Patterns found in the text (credit card, AWS key, ...); advisory only.
+    sensitiveDataFlags: string[];
     totalSize: number;
     passwordProtected: boolean;
     maxViews: number | null;
@@ -204,10 +206,19 @@ export interface ShareBlockedEvent {
     at: string;
 }
 
+// Patterns found in the share's text (credit card, AWS key, ...); advisory
+// only, never blocks the share and isn't exhaustive.
+export interface ShareSensitiveDataEvent {
+    code: string;
+    categories: string[];
+    at: string;
+}
+
 // What the server answers when the browser starts watching a share.
 export interface WatchedShareState {
     status: "uploading" | "processing" | "ready" | "ended";
     endedReason: EndedReason | null;
+    sensitiveDataFlags: string[];
 }
 
 // A browser or device logged in to the account (GET /api/me/sessions).
@@ -223,7 +234,13 @@ export interface DeviceSession {
 }
 
 // Notifications (the bell, and how each kind of event is delivered)
-export type NotificationEvent = "fileDownloaded" | "shareEnded" | "shareBlocked" | "newDevice" | "weeklySummary";
+export type NotificationEvent =
+    | "fileDownloaded"
+    | "shareEnded"
+    | "shareBlocked"
+    | "shareSensitiveData"
+    | "newDevice"
+    | "weeklySummary";
 
 export interface AppNotification {
     id: string;

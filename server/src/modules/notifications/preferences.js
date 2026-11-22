@@ -22,6 +22,10 @@ const EVENTS = {
         label: "A share is blocked because a file contains malware",
         defaults: { inApp: true, email: true, push: true },
     },
+    shareSensitiveData: {
+        label: "A share you created might contain sensitive data (card numbers, keys, ...)",
+        defaults: { inApp: true, email: false, push: false },
+    },
     newDevice: {
         label: "Your account is logged in to from a new device",
         defaults: { inApp: true, email: true, push: true },

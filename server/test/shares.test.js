@@ -45,6 +45,15 @@ describe("creating shares", () => {
         expect(await Share.countDocuments()).toBe(0);
     });
 
+    test("sensitive-looking text is flagged but never blocks the share, even while files are still uploading", async () => {
+        const { res, code } = await share({ text: "card 4111 1111 1111 1111" }, [{ name: "a.txt", content: "hello" }], {
+            upload: false,
+        });
+        expect(res.status).toBe(201);
+        expect(res.body.status).toBe("uploading");
+        expect((await Share.findOne({ code })).sensitiveDataFlags).toEqual(["credit_card"]);
+    });
+
     test("applies the chosen expiry", async () => {
         const { body } = await share({ text: "x", expiresIn: "1h" });
         const ms = new Date(body.expiresAt) - Date.now();

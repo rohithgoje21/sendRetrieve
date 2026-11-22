@@ -98,6 +98,7 @@ describe("searching my shares", () => {
         textPreview: null,
         files: [{ id: "f1", name: "report.pdf", size: 2048, mimeType: "application/pdf", downloads: 0, scanStatus: "clean" }],
         processing: false,
+        sensitiveDataFlags: [],
         totalSize: 2048,
         passwordProtected: false,
         maxViews: null,

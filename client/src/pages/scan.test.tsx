@@ -59,9 +59,28 @@ test("a file with malware blocks the share: the code is withdrawn and the sender
 });
 
 test("a scan that finished before the page started watching isn't missed", async () => {
-    appSocket().replies.set("share:watch", { ok: true, share: { status: "ready", endedReason: null } });
+    appSocket().replies.set("share:watch", { ok: true, share: { status: "ready", endedReason: null, sensitiveDataFlags: [] } });
     await send();
     expect(await screen.findByRole("heading", { name: "Your share is ready" })).toBeInTheDocument();
+});
+
+test("a possible sensitive-data match shows a dismissible warning", async () => {
+    await send();
+    act(() => appSocket().fire("share:ready", { code: "ABCD2345", at: new Date().toISOString() }));
+    await screen.findByRole("heading", { name: "Your share is ready" });
+
+    act(() => appSocket().fire("share:sensitive_data", { code: "ABCD2345", categories: ["credit_card"], at: new Date().toISOString() }));
+    expect(await screen.findByText(/This might contain a credit card number/)).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/This might contain a credit card number/)).not.toBeInTheDocument();
+});
+
+test("a sensitive-data match found before watching started isn't missed", async () => {
+    appSocket().replies.set("share:watch", { ok: true, share: { status: "ready", endedReason: null, sensitiveDataFlags: ["aws_access_key"] } });
+    await send();
+    expect(await screen.findByText(/This might contain an AWS access key/)).toBeInTheDocument();
 });
 
 test("events about other shares don't change the result", async () => {
@@ -81,6 +100,7 @@ test("My shares marks shares being scanned and shares blocked for malware", asyn
         textPreview: null,
         files: [{ id: "f1", name: "photo.png", size: 10, mimeType: "image/png", downloads: 0, scanStatus: "pending" }],
         processing: true,
+        sensitiveDataFlags: [],
         totalSize: 10,
         passwordProtected: false,
         maxViews: null,

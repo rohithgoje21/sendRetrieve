@@ -84,12 +84,25 @@ const initRealtime = async (httpServer, { redis = null } = {}) => {
                 socket.join(`share:${share._id}`);
                 // Its state now (read after joining, so no event falls in
                 // between): e.g. a scan may have finished before the watch.
-                const current = await Share.findById(share._id, { uploadPending: 1, processing: 1, endedAt: 1, endedReason: 1 }).lean();
+                const current = await Share.findById(share._id, {
+                    uploadPending: 1,
+                    processing: 1,
+                    endedAt: 1,
+                    endedReason: 1,
+                    sensitiveDataFlags: 1,
+                }).lean();
                 let status = "ready";
                 if (!current || current.endedAt) status = "ended";
                 else if (current.uploadPending) status = "uploading";
                 else if (current.processing) status = "processing";
-                respond({ ok: true, share: { status, endedReason: current?.endedReason ?? null } });
+                respond({
+                    ok: true,
+                    share: {
+                        status,
+                        endedReason: current?.endedReason ?? null,
+                        sensitiveDataFlags: current?.sensitiveDataFlags ?? [],
+                    },
+                });
             } catch (err) {
                 log.error({ err }, "share:watch failed");
                 respond({ ok: false, error: "Something went wrong" });

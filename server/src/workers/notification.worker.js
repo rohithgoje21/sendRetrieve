@@ -96,6 +96,22 @@ const handlers = {
         });
     },
 
+    "share.sensitive_data": async (message, ctx) => {
+        const { ownerId, code, categories } = message.data;
+        if (!ownerId) return;
+        const shown = formatCode(code);
+        await notify(ctx, message, {
+            userId: ownerId,
+            event: "shareSensitiveData",
+            content: {
+                title: `Share ${shown} might contain sensitive data`,
+                body: `Possible: ${categories.join(", ")}. This check isn't exhaustive — double check before sharing.`,
+                link: "/shares",
+                tag: `sensitive:${code}`,
+            },
+        });
+    },
+
     // A login from a browser this account hasn't used before.
     "auth.login": async (message, ctx) => {
         const { userId, newDevice, device, ipHint, at, accountUrl } = message.data;

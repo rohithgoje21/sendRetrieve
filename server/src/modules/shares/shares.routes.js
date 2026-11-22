@@ -15,6 +15,7 @@ const { baseUrl } = require("../../shared/urls");
 const { PREVIEWABLE_TYPES, liveFilter, serializeFile, discardShares, NOT_FOUND_MESSAGE } = require("./shares.service");
 const { notifyShare } = require("../realtime/realtime");
 const scanner = require("../../infrastructure/clamav");
+const { scanText } = require("../../infrastructure/piiScanner");
 const { publish } = require("../../infrastructure/queue");
 const { hashPassword, verifyPassword } = require("../../shared/passwords");
 const { visitorToken } = require("../analytics/visitors");
@@ -285,12 +286,17 @@ const createSharesRouter = (ctx) => {
             // expiry starts once the upload completes.
             const expiresAt = new Date(Date.now() + (pending ? config.uploadWindowSeconds : durationSeconds) * 1000);
             const { token: manageToken, hash: manageTokenHash } = createManageToken();
+            // Checked now, not after upload: the text is already final, and
+            // text-only shares (no files) never go through the processing
+            // worker, which only runs after share.uploaded.
+            const { categories: sensitiveDataFlags } = scanText(text);
 
             const share = await insertWithUniqueCode({
                 _id: shareId,
                 ownerId: req.user?._id ?? null,
                 text,
                 files: fileDocs,
+                sensitiveDataFlags,
                 passwordHash: password ? await hashPassword(password) : null,
                 maxViews,
                 viewsRemaining: maxViews,
@@ -302,6 +308,16 @@ const createSharesRouter = (ctx) => {
             });
 
             const uploads = await Promise.all(share.files.map(uploadTarget));
+
+            if (sensitiveDataFlags.length) {
+                notifyShare(share, "share:sensitive_data", { categories: sensitiveDataFlags });
+                await publish("share.sensitive_data", {
+                    shareId: String(share._id),
+                    ownerId: share.ownerId ? String(share.ownerId) : null,
+                    code: share.code,
+                    categories: sensitiveDataFlags,
+                });
+            }
 
             if (!pending) {
                 logCreated(req, share);

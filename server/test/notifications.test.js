@@ -63,6 +63,7 @@ describe("preferences", () => {
             fileDownloaded: { inApp: true, email: false, push: true },
             shareEnded: { inApp: true, email: false, push: false },
             shareBlocked: { inApp: true, email: true, push: true },
+            shareSensitiveData: { inApp: true, email: false, push: false },
             newDevice: { inApp: true, email: true, push: true },
             weeklySummary: { inApp: true, email: true, push: false },
         });
@@ -182,6 +183,31 @@ describe("email", () => {
         expect(email.text).toMatch(/"eicar.txt" \(Eicar-Test-Signature\)/);
         const { notifications } = await notificationsOf(owner);
         expect(notifications.map((n) => n.event)).toEqual(["shareBlocked"]);
+    });
+
+    test("a share with what looks like a credit card number is flagged, in-app only by default", async () => {
+        const owner = await register();
+        await createShare(owner, { text: "here's my card: 4111 1111 1111 1111" });
+        await settle();
+
+        const { notifications } = await notificationsOf(owner);
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0]).toMatchObject({ event: "shareSensitiveData", link: "/shares" });
+        expect(notifications[0].title).toMatch(/might contain sensitive data/);
+        expect(emails(/sensitive/)).toHaveLength(0); // email is off by default for this event
+    });
+
+    test("a guest share with sensitive text notifies nobody, but still flags the share", async () => {
+        const { code } = await createShare(app, { text: "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE" });
+        expect(await Notification.countDocuments()).toBe(0);
+        expect((await Share.findOne({ code })).sensitiveDataFlags).toEqual(["aws_access_key"]);
+    });
+
+    test("plain text isn't flagged", async () => {
+        const owner = await register();
+        const { code } = await createShare(owner, { text: "just the meeting notes from today" });
+        expect(await Notification.countDocuments()).toBe(0);
+        expect((await Share.findOne({ code })).sensitiveDataFlags).toEqual([]);
     });
 
     test("every email can be turned off from its own link, or in one click from the mail app", async () => {

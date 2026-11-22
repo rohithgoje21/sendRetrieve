@@ -237,10 +237,18 @@ function BlockedResult({ status, onReset }: { status: Extract<LiveShareStatus, {
     );
 }
 
+const SENSITIVE_CATEGORY_LABELS: Record<string, string> = {
+    credit_card: "a credit card number",
+    aws_access_key: "an AWS access key",
+    private_key: "a private key",
+    api_token: "an API token or secret",
+};
+
 function SendResult({ share, onReset }: { share: CreatedShare; onReset: () => void }) {
     const code = formatCode(share.code);
-    const { activity, connected, status } = useShareActivity(share.code, share.manageToken, share.status);
+    const { activity, connected, status, sensitiveCategories } = useShareActivity(share.code, share.manageToken, share.status);
     const scanning = status.status === "processing";
+    const [sensitiveDismissed, setSensitiveDismissed] = useState(false);
 
     if (status.status === "blocked") return <BlockedResult status={status} onReset={onReset} />;
 
@@ -263,6 +271,23 @@ function SendResult({ share, onReset }: { share: CreatedShare; onReset: () => vo
                         Send the code or the link to whoever needs it.
                     </p>
                 </>
+            )}
+
+            {sensitiveCategories.length > 0 && !sensitiveDismissed && (
+                <Alert tone="warning" className="mt-4 text-left">
+                    <p>
+                        This might contain{" "}
+                        {sensitiveCategories.map((c) => SENSITIVE_CATEGORY_LABELS[c] ?? c).join(", ")} — double check before
+                        sharing. (This check isn't exhaustive.)
+                    </p>
+                    <button
+                        type="button"
+                        className="mt-1 font-medium underline underline-offset-2"
+                        onClick={() => setSensitiveDismissed(true)}
+                    >
+                        Dismiss
+                    </button>
+                </Alert>
             )}
 
             <div className="mt-6 rounded-xl bg-zinc-50 px-4 py-5 dark:bg-zinc-800/50">

@@ -11,6 +11,7 @@ import type {
     ShareEndedEvent,
     ShareOpenedEvent,
     ShareReadyEvent,
+    ShareSensitiveDataEvent,
     WatchedShareState,
 } from "@/lib/types";
 import { useSession } from "./useSession";
@@ -86,6 +87,7 @@ export function useShareActivity(code: string, manageToken: string, initialStatu
     const [activity, setActivity] = useState<ActivityItem[]>([]);
     const [connected, setConnected] = useState(() => getSocket().connected);
     const [status, setStatus] = useState<LiveShareStatus>({ status: initialStatus });
+    const [sensitiveCategories, setSensitiveCategories] = useState<string[]>([]);
 
     useEffect(() => {
         const socket = getSocket();
@@ -107,8 +109,10 @@ export function useShareActivity(code: string, manageToken: string, initialStatu
         const onReady = (e: ShareReadyEvent) => e.code === code && setStatus({ status: "ready" });
         const onBlocked = (e: ShareBlockedEvent) =>
             e.code === code && setStatus({ status: "blocked", fileName: e.fileName, signature: e.signature });
+        const onSensitive = (e: ShareSensitiveDataEvent) => e.code === code && setSensitiveCategories(e.categories);
         // The state when watching starts: the scan may have finished already.
         const onState = (state: WatchedShareState) => {
+            if (state.sensitiveDataFlags?.length) setSensitiveCategories(state.sensitiveDataFlags);
             if (state.status === "uploading") return;
             if (state.status === "ready" || state.status === "processing") setStatus({ status: state.status });
             else if (state.endedReason === "malware") {
@@ -123,6 +127,7 @@ export function useShareActivity(code: string, manageToken: string, initialStatu
         socket.on("share:ended", onEnded);
         socket.on("share:ready", onReady);
         socket.on("share:blocked", onBlocked);
+        socket.on("share:sensitive_data", onSensitive);
         socket.on("connect", onConnect);
         socket.on("disconnect", onDisconnect);
         const unwatch = watchShare(code, manageToken, onState);
@@ -134,10 +139,11 @@ export function useShareActivity(code: string, manageToken: string, initialStatu
             socket.off("share:ended", onEnded);
             socket.off("share:ready", onReady);
             socket.off("share:blocked", onBlocked);
+            socket.off("share:sensitive_data", onSensitive);
             socket.off("connect", onConnect);
             socket.off("disconnect", onDisconnect);
         };
     }, [code, manageToken]);
 
-    return { activity, connected, status };
+    return { activity, connected, status, sensitiveCategories };
 }

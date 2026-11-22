@@ -81,6 +81,8 @@ const serializeOwnedShare = (share, baseUrl, { includeContent = false } = {}) =>
         })),
         // Still being scanned: not openable yet.
         processing: Boolean(share.processing),
+        // Patterns found in the text (credit card, AWS key, ...); advisory only.
+        sensitiveDataFlags: share.sensitiveDataFlags ?? [],
         totalSize: share.files.reduce((sum, f) => sum + f.size, 0),
         passwordProtected: Boolean(share.passwordHash),
         maxViews: share.maxViews,

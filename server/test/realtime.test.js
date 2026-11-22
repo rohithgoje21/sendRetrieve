@@ -62,7 +62,10 @@ describe("watching a share with its manage token (any sender, guests included)",
     test("sees each open and download as it happens", async () => {
         const { code, manageToken } = await createShare(http_(), { maxViews: 5 }, [{ name: "notes.txt", content: "hi" }]);
         const socket = await connect();
-        expect(await watch(socket, code, manageToken)).toEqual({ ok: true, share: { status: "ready", endedReason: null } });
+        expect(await watch(socket, code, manageToken)).toEqual({
+            ok: true,
+            share: { status: "ready", endedReason: null, sensitiveDataFlags: [] },
+        });
 
         const opened = nextEvent(socket, "share:opened");
         const res = await http_().post(`/api/shares/${code}/open`).expect(200);
