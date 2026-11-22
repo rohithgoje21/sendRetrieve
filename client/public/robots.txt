@@ -1,0 +1,16 @@
+User-agent: *
+Allow: /$
+Allow: /login
+Allow: /signup
+Disallow: /s/
+Disallow: /open
+Disallow: /shares
+Disallow: /account
+Disallow: /analytics
+Disallow: /verify-email
+Disallow: /admin
+Disallow: /reset-password
+Disallow: /forgot-password
+Disallow: /unsubscribe
+
+Sitemap: https://send-retrieve.vercel.app/sitemap.xml
